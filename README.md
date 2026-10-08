@@ -6,7 +6,7 @@ macOS 屏幕常驻小窗，显示 **Codex 与 Claude Code 的编程订阅剩余�
 
 ## 下载与安装
 
-1. 在 [Releases](https://github.com/chenjinfu00/token-monitor/releases/latest) 下载 macOS 安装包。
+1. 下载 [DMG 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.7.0/Token-Monitor-0.7.0-macos-universal.dmg) 或 [ZIP 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.7.0/Token-Monitor-0.7.0-macos-universal.zip)。两者同时支持 Apple Silicon 与 Intel。
 2. ZIP 解压后，将 **Token Monitor.app** 拖到 Finder 的“应用程序”。如果下载的是 DMG，打开后将应用拖到“应用程序”。
 3. 从“应用程序”双击 **Token Monitor**。应用会显示悬浮窗和菜单栏仪表图标，不显示 Dock 图标。
 
@@ -89,7 +89,7 @@ zsh build.sh
 
 构建输出为 `dist/Token Monitor.app`。构建架构以构建脚本和发行版说明为准；下载发行包不需要 Swift 工具链。测试入口优先使用已有的 Anaconda Python，否则使用 `PATH` 中的 `python3`，不会安装依赖。测试只使用固定样例和临时目录，不访问账户、不发起模型请求，也不修改真实 Claude 设置。
 
-发布流程由 GitHub Actions 执行：版本标签（如 `v0.7.0`）触发构建、测试和发行包上传。当前没有自动更新，请从 Releases 下载新版本后替换应用。
+当前安装包保存在 [`downloads/v0.7.0/`](downloads/v0.7.0/)，同目录提供 `SHA256SUMS.txt`。另提供 GitHub Actions 发行工作流：推送版本标签（如 `v0.7.0`）后测试、构建并上传到 Releases。当前没有自动更新，请从仓库下载新版本后替换应用。
 
 可在本机手动检查官方额度读取；这些命令会实际查询当前官方 CLI 账户，只输出白名单额度摘要：
 
