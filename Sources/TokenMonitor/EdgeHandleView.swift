@@ -71,9 +71,9 @@ struct EdgeHandleView: View {
         }
         .contentShape(Rectangle())
         .overlay(NativeCollapsedWindowInteraction(onClick: onExpand, onDragEnded: onDragEnded))
-        .help(tooltip + "\n点击展开额度小窗 · 拖动可移动")
+        .help(tooltip + "\n双击展开额度小窗 · 拖动可移动")
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("展开额度小窗；" + tooltip)
+        .accessibilityLabel("双击展开额度小窗；" + tooltip)
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { onExpand() }
     }

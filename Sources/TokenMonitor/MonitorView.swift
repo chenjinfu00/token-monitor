@@ -70,13 +70,13 @@ struct MonitorView: View {
             ProviderCard(state: store.codex, accent: .codexGreen, symbol: "terminal",
                 compact: store.compact, now: now, sourceDescription: "Codex 官方服务端额度", websiteNews: store.resetNews,
                 refresh: refreshAction,
-                toggleEdge: onToggleEdge, close: onClose)
+                toggleEdge: onToggleEdge, close: onClose, onDoubleClick: onToggleEdge)
             Divider().opacity(0.35).padding(.horizontal, 8)
             ProviderCard(state: store.claude, accent: .claudeOrange, symbol: "sparkle",
                 compact: store.compact, now: now,
                 sourceDescription: store.claudeUsesStatusLine ? "Claude Code 状态栏回调" : "官方 Claude Code 服务端实时额度",
                 setupMessage: store.setupMessage, isConnecting: store.isConnectingClaude,
-                connect: connectAction, login: loginAction)
+                connect: connectAction, login: loginAction, onDoubleClick: onToggleEdge)
         }
     }
 }
@@ -96,6 +96,7 @@ private struct ProviderCard: View {
     var isConnecting = false
     var connect: (() -> Void)? = nil
     var login: (() -> Void)? = nil
+    var onDoubleClick: (() -> Void)? = nil
 
     private var isStale: Bool { state.updatedAt.map { now.timeIntervalSince($0) > 300 } ?? false }
     private var windows: [QuotaWindow] { compact ? Array(state.windows.prefix(2)) : state.windows }
@@ -126,8 +127,8 @@ private struct ProviderCard: View {
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
                 .frame(minWidth: 40, minHeight: 26, alignment: .leading)
-                .help(state.name + "\n" + state.ageText(at: now))
-                .overlay { NativeWindowDragRegion() }
+                .help(state.name + "\n" + state.ageText(at: now) + "\n双击收起额度小窗 · 拖动可移动")
+                .overlay { NativeWindowDragRegion(onDoubleClick: onDoubleClick) }
             if state.name.contains("演示") {
                 Text("演示").font(.system(size: 12)).foregroundStyle(.secondary)
             }
@@ -148,7 +149,8 @@ private struct ProviderCard: View {
             }
             Spacer(minLength: 2)
                 .frame(minHeight: 26)
-                .overlay { NativeWindowDragRegion() }
+                .overlay { NativeWindowDragRegion(onDoubleClick: onDoubleClick) }
+                .help("双击收起额度小窗 · 拖动可移动")
             if state.isLoading {
                 ProgressView().controlSize(.small)
                     .frame(width: 16, height: 16).accessibilityLabel("正在同步额度")

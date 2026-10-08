@@ -81,12 +81,22 @@ final class FloatingWindowHostingView<Content: View>: NSHostingView<Content> {
 // when SwiftUI's hosting view handles other background events itself.
 @MainActor
 struct NativeWindowDragRegion: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSView { WindowDragHitView() }
-    func updateNSView(_ nsView: NSView, context: Context) {}
+    var onDoubleClick: (() -> Void)? = nil
+
+    func makeNSView(context: Context) -> NSView {
+        let view = WindowDragHitView()
+        view.onDoubleClick = onDoubleClick
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        (nsView as? WindowDragHitView)?.onDoubleClick = onDoubleClick
+    }
 }
 
 @MainActor
 private final class WindowDragHitView: NSView {
+    var onDoubleClick: (() -> Void)?
     override var isOpaque: Bool { false }
     override var mouseDownCanMoveWindow: Bool { true }
     override var acceptsFirstResponder: Bool { false }
@@ -94,6 +104,10 @@ private final class WindowDragHitView: NSView {
     override func shouldDelayWindowOrdering(for event: NSEvent) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2, let onDoubleClick {
+            onDoubleClick()
+            return
+        }
         window?.performDrag(with: event)
     }
 }
@@ -167,6 +181,6 @@ private final class CollapsedWindowInteractionView: NSView {
         }
         panel?.isTrackingCollapsedInteraction = false
         if dragged { onDragEnded() }
-        else if window.isVisible { onClick() }
+        else if window.isVisible, event.clickCount == 2 { onClick() }
     }
 }
