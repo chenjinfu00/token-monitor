@@ -2,11 +2,13 @@
 
 macOS 屏幕常驻小窗，显示 **Codex 与 Claude Code 的编程订阅剩余额度和重置时间**。原生毛玻璃背景，可拖动、隐藏，或收起为屏幕边缘的 48 像素缩略窗。
 
+[下载 DMG](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.7.1/Token-Monitor-0.7.1-macos-universal.dmg) · [安装与登录](#下载与安装) · [MIT 许可证](LICENSE)
+
 显示的是服务返回的额度百分比，不是精确 token 数，也不覆盖普通 ChatGPT 网页聊天的所有用量。需要 macOS 13 或更新版本。
 
 ## 下载与安装
 
-1. 下载 [DMG 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.7.0/Token-Monitor-0.7.0-macos-universal.dmg) 或 [ZIP 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.7.0/Token-Monitor-0.7.0-macos-universal.zip)。两者同时支持 Apple Silicon 与 Intel。
+1. 下载 [DMG 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.7.1/Token-Monitor-0.7.1-macos-universal.dmg) 或 [ZIP 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.7.1/Token-Monitor-0.7.1-macos-universal.zip)。两者同时支持 Apple Silicon 与 Intel。
 2. ZIP 解压后，将 **Token Monitor.app** 拖到 Finder 的“应用程序”。如果下载的是 DMG，打开后将应用拖到“应用程序”。
 3. 从“应用程序”双击 **Token Monitor**。应用会显示悬浮窗和菜单栏仪表图标，不显示 Dock 图标。
 
@@ -17,7 +19,35 @@ macOS 屏幕常驻小窗，显示 **Codex 与 Claude Code 的编程订阅剩余�
 - **Codex**：安装并登录 [官方 Codex](https://learn.chatgpt.com/docs/codex/cli)。应用可发现常见位置的 Codex CLI 和 Codex 桌面应用内置 CLI；API key 登录不一定提供订阅额度。
 - **Claude**：安装并登录 [官方 Claude Code CLI](https://code.claude.com/docs/en/quickstart)，使用 Claude 订阅认证。Claude 桌面应用和终端 CLI 的登录会话可能不同；只登录桌面应用不足以保证这里可以查询。
 
+首次设置可以按下面的顺序完成；官方工具若已经装好并登录，只需打开 Token Monitor：
+
+| 步骤 | 操作 |
+| --- | --- |
+| 1 | 安装 Token Monitor，并移入“应用程序”。 |
+| 2 | 在官方 Codex CLI 执行 `codex login`，选择 ChatGPT 账户并完成浏览器授权；也可使用应用能找到的官方桌面内置 CLI。 |
+| 3 | 在官方 Claude Code CLI 执行 `claude auth login --claudeai`，完成订阅账户授权；也可用 Token Monitor 菜单栏的登录入口。 |
+| 4 | 打开 Token Monitor，等待首次同步；之后通常每分钟更新。 |
+
+仅在 ChatGPT 或 Claude 网页登录不会为本工具建立本机 CLI 会话。需要账户本身具备对应的编程工具使用权限；API 付费账户的余额不属于这里监控的订阅额度。官方工具由各服务提供，本安装包不内置它们，也不会自动替用户安装。
+
 无需在 Token Monitor 中重复登录已有的有效账户。未安装、未登录或当前官方工具不支持读取额度时，会显示等待或错误说明；点击对应的 **i** 查看详情。需要重新登录 Claude Code 时，可从菜单栏选择“登录终端 Claude Code”，在官方登录页面自行完成授权。
+
+## 常见情况
+
+| 看到的状态 | 如何处理 |
+| --- | --- |
+| 未找到 Codex / Claude Code | 先安装对应官方工具；应用可发现 Homebrew 和 `~/.local/bin` 等常见安装位置。 |
+| 未登录或授权过期 | 在官方工具重新登录，再点击“立即同步”；浏览器网页登录不能替代 CLI 登录。 |
+| Claude 时间“待定” | 服务没有返回重置时刻，保持未知并继续同步，无需重新登录。 |
+| 超时、离线或服务限流 | 检查本机网络；应用保留最后一次确认的数据并自动重试，限流时退避。 |
+| 只显示一个服务 | 两家独立查询，先配置另一家的官方工具和订阅认证即可。 |
+| 系统提示开发者无法验证 | 参照上面的 Apple 首次打开说明；当前安装包尚未公证。 |
+
+卸载时退出应用，再从“应用程序”移走 Token Monitor。若启用过可选 Claude 状态栏采集，可先在终端运行下面的命令解除连接；默认主动查询模式不修改 Claude 设置：
+
+```sh
+python3 "$HOME/.claude/token-monitor/bridge.py" uninstall
+```
 
 ## 日常使用
 
@@ -31,7 +61,7 @@ macOS 屏幕常驻小窗，显示 **Codex 与 Claude Code 的编程订阅剩余�
 - “隐藏小窗口”隐藏展开窗和缩略窗，继续后台同步。“显示小窗口”恢复上次模式；应用已隐藏时再次双击打开也会恢复显示。缩略窗已显示时，再次打开应用不会强制展开。
 - 菜单栏“紧凑 / 完整显示”切换显示周期数量；“退出 Token Monitor”停止后台同步并退出。可在 macOS“登录项”中添加应用，让它登录后自动打开。
 
-**重置日期固定使用 `Europe/Amsterdam` 时区，并自动处理夏令时。** 主界面显示月、日、时、分，不显示年份或秒；当前没有时区选择设置。
+**重置日期跟随 macOS 当前时区，并自动处理夏令时。** 主界面只显示月、日、时、分；详情中可查看时区。服务没有提供 Claude 重置时间时，日期与倒计时显示“待定”；额度百分比照常显示，未知时间不绘制时间进度。
 
 额度条与蓝色时间条都表示 **剩余百分比**。额度比剩余时间多超过 5 个百分点时为绿，少至少 15 个百分点时为红，其余为黄；未知、周期不明或已经结束时为灰。这只是均匀使用节奏的参照，不能用来推算剩余 token。
 
@@ -87,9 +117,17 @@ zsh tools/test.sh
 zsh build.sh
 ```
 
-构建输出为 `dist/Token Monitor.app`。构建架构以构建脚本和发行版说明为准；下载发行包不需要 Swift 工具链。测试入口优先使用已有的 Anaconda Python，否则使用 `PATH` 中的 `python3`，不会安装依赖。测试只使用固定样例和临时目录，不访问账户、不发起模型请求，也不修改真实 Claude 设置。
+构建输出为 `dist/Token Monitor.app`，默认构建当前电脑的架构。构建 Intel + Apple Silicon 通用应用使用 `zsh build.sh --universal`；生成可下载的 ZIP、DMG 和校验文件使用 `zsh tools/package-release.sh`。下载发行包不需要 Swift 工具链。测试入口优先使用已有的 Anaconda Python，否则使用 `PATH` 中的 `python3`，不会安装依赖。测试只使用固定样例和临时目录，不访问账户、不发起模型请求，也不修改真实 Claude 设置。
 
-当前安装包保存在 [`downloads/v0.7.0/`](downloads/v0.7.0/)，同目录提供 `SHA256SUMS.txt`。另提供 GitHub Actions 发行工作流：推送版本标签（如 `v0.7.0`）后测试、构建并上传到 Releases。当前没有自动更新，请从仓库下载新版本后替换应用。
+当前安装包保存在 [`downloads/v0.7.1/`](downloads/v0.7.1/)，同目录提供 `SHA256SUMS.txt`。另提供 GitHub Actions 发行工作流：推送版本标签（如 `v0.7.1`）后测试、构建并上传到 Releases。主分支和 Pull Request 的独立检查只测试及构建，不发布安装包。当前没有自动更新，请从仓库下载新版本后替换应用。
+
+校验单个下载文件时，在终端进入下载目录并运行：
+
+```sh
+shasum -a 256 Token-Monitor-0.7.1-macos-universal.dmg
+```
+
+将输出与同目录 `SHA256SUMS.txt` 的 DMG 那一行比较；ZIP 同理，只需检查自己下载的文件。安装包目录的 `BUILD_INFO.md` 记录源码提交、构建版本与架构。
 
 可在本机手动检查官方额度读取；这些命令会实际查询当前官方 CLI 账户，只输出白名单额度摘要：
 
@@ -99,6 +137,12 @@ zsh build.sh
 ```
 
 `--demo` 仅供界面验证，使用带“演示”标记的数据。`TOKEN_MONITOR_CODEX` 可指定 Codex 可执行文件；`TOKEN_MONITOR_DATA_DIR` 可指定状态栏快照目录；`TOKEN_MONITOR_HOME` 仅供 Python 桥接安装测试。
+
+## 许可证与贡献
+
+项目采用 [MIT License](LICENSE)，允许使用、修改、再分发和商业使用；分发时请保留版权与许可声明。应用包中也附带许可证。OpenAI、Anthropic 的服务和商标仍由各自权利人管理。
+
+欢迎通过 [GitHub Issues](https://github.com/chenjinfu00/token-monitor/issues) 报告问题或提交改进。请参阅 [贡献说明](CONTRIBUTING.md)，不要附上账户凭据或原始登录日志。
 
 ## 接口参考
 

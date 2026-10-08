@@ -75,22 +75,28 @@ struct QuotaWindow: Identifiable, Equatable {
 }
 
 enum WidgetDateFormatter {
-    private static func formatter(_ format: String) -> DateFormatter {
+    static var timeZoneLabel: String { TimeZone.autoupdatingCurrent.identifier }
+
+    private static func formatted(_ date: Date, format: String, timeZone: TimeZone) -> String {
         let value = DateFormatter()
         value.locale = Locale(identifier: "zh_CN")
-        value.timeZone = TimeZone(identifier: "Europe/Amsterdam")
+        value.timeZone = timeZone
         value.dateFormat = format
-        return value
+        return value.string(from: date)
     }
 
-    private static let short = formatter("MM/dd HH:mm")
-    private static let day = formatter("MM/dd")
-    private static let time = formatter("HH:mm")
-
-    static func reset(_ date: Date) -> String { short.string(from: date) }
-    static func shortReset(_ date: Date) -> String { short.string(from: date) }
-    static func resetDay(_ date: Date) -> String { day.string(from: date) }
-    static func resetTime(_ date: Date) -> String { time.string(from: date) }
+    static func reset(_ date: Date, timeZone: TimeZone = .autoupdatingCurrent) -> String {
+        formatted(date, format: "MM/dd HH:mm", timeZone: timeZone)
+    }
+    static func shortReset(_ date: Date, timeZone: TimeZone = .autoupdatingCurrent) -> String {
+        reset(date, timeZone: timeZone)
+    }
+    static func resetDay(_ date: Date, timeZone: TimeZone = .autoupdatingCurrent) -> String {
+        formatted(date, format: "MM/dd", timeZone: timeZone)
+    }
+    static func resetTime(_ date: Date, timeZone: TimeZone = .autoupdatingCurrent) -> String {
+        formatted(date, format: "HH:mm", timeZone: timeZone)
+    }
 }
 
 struct ProviderState: Equatable {

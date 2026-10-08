@@ -201,7 +201,8 @@ private struct ProviderCard: View {
     }
 
     private func resetDescription(_ window: QuotaWindow) -> String {
-        window.countdown(at: now) + (window.resetsAt.map { "\n重置时间：\(WidgetDateFormatter.reset($0))\nEurope/Amsterdam" } ?? "")
+        guard let reset = window.resetsAt else { return "重置时间待定" }
+        return window.countdown(at: now) + "\n重置时间：\(WidgetDateFormatter.reset(reset))\n\(WidgetDateFormatter.timeZoneLabel)"
     }
 
     private var providerDetails: some View {
@@ -223,12 +224,12 @@ private struct ProviderCard: View {
                 ForEach(state.windows) { window in
                     VStack(alignment: .leading, spacing: 3) {
                         Text(window.name).font(.system(size: 14, weight: .semibold))
-                        Text("重置：\(window.resetsAt.map { WidgetDateFormatter.reset($0) } ?? "未知")")
+                        Text("重置：\(window.resetsAt.map { WidgetDateFormatter.reset($0) } ?? "待定")")
                             .font(.system(size: 14)).monospacedDigit()
                     }
                 }
             }
-            Text("Europe/Amsterdam").font(.system(size: 12)).foregroundStyle(.secondary)
+            Text(WidgetDateFormatter.timeZoneLabel).font(.system(size: 12)).foregroundStyle(.secondary)
         }
     }
 }
@@ -453,7 +454,7 @@ private struct ResetTimeButton: View {
     var body: some View {
         Button { showsDetails.toggle() } label: {
             VStack(alignment: .leading, spacing: 3) {
-                Text(timestamp.map { WidgetDateFormatter.shortReset($0) } ?? "—")
+                Text(timestamp.map { WidgetDateFormatter.shortReset($0) } ?? "待定")
                     .font(.system(size: 14, weight: .medium, design: .rounded))
                     .foregroundStyle(color)
                 Text(resetCountdown(timestamp, at: now))
@@ -506,7 +507,7 @@ private func hourglassPhase(_ remaining: Double) -> String {
 }
 
 private func resetCountdown(_ reset: Date?, at now: Date) -> String {
-    guard let reset else { return "时间未知" }
+    guard let reset else { return "待定" }
     let seconds = reset.timeIntervalSince(now)
     guard seconds > 0 else { return "等待更新" }
     let minutes = max(1, Int(ceil(seconds / 60)))
@@ -521,7 +522,7 @@ private func websiteReferenceDescription(_ reference: WebsiteResetReference, sou
         + "\n预计参考点：\(WidgetDateFormatter.reset(reference.referenceAt))"
         + "\n网站预测窗口开始：\(WidgetDateFormatter.reset(reference.windowStartAt))"
         + "\n网站预测窗口结束：\(WidgetDateFormatter.reset(reference.windowEndAt))"
-        + "\nEurope/Amsterdam"
+        + "\n" + WidgetDateFormatter.timeZoneLabel
 }
 
 private struct ProviderHeightPreference: PreferenceKey {

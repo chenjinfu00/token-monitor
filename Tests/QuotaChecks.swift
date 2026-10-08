@@ -111,15 +111,22 @@ final class QuotaParserTests {
         XCTAssertEqual(invalid.paceLevel(at: now), .unknown)
     }
 
-    func testExactResetDatesUseAmsterdamAndDaylightSaving() {
+    func testExactResetDatesFollowTimeZoneAndDaylightSaving() {
         let summer = ResetNewsParser.date("2026-10-08T13:10:00Z")!
         let winter = ResetNewsParser.date("2026-11-08T13:10:00Z")!
-        XCTAssertEqual(WidgetDateFormatter.shortReset(summer), "10/08 15:10")
-        XCTAssertEqual(WidgetDateFormatter.reset(summer), "10/08 15:10")
-        XCTAssertEqual(WidgetDateFormatter.resetDay(summer), "10/08")
-        XCTAssertEqual(WidgetDateFormatter.resetTime(summer), "15:10")
-        XCTAssertEqual(WidgetDateFormatter.shortReset(winter), "11/08 14:10")
-        XCTAssertEqual(WidgetDateFormatter.reset(winter), "11/08 14:10")
+        let amsterdam = TimeZone(identifier: "Europe/Amsterdam")!
+        XCTAssertEqual(WidgetDateFormatter.shortReset(summer, timeZone: amsterdam), "10/08 15:10")
+        XCTAssertEqual(WidgetDateFormatter.reset(summer, timeZone: amsterdam), "10/08 15:10")
+        XCTAssertEqual(WidgetDateFormatter.resetDay(summer, timeZone: amsterdam), "10/08")
+        XCTAssertEqual(WidgetDateFormatter.resetTime(summer, timeZone: amsterdam), "15:10")
+        XCTAssertEqual(WidgetDateFormatter.shortReset(winter, timeZone: amsterdam), "11/08 14:10")
+        XCTAssertEqual(WidgetDateFormatter.reset(winter, timeZone: amsterdam), "11/08 14:10")
+        let shanghai = TimeZone(identifier: "Asia/Shanghai")!
+        XCTAssertEqual(WidgetDateFormatter.reset(summer, timeZone: shanghai), "10/08 21:10")
+        XCTAssertEqual(WidgetDateFormatter.reset(winter, timeZone: shanghai), "11/08 21:10")
+        XCTAssertEqual(WidgetDateFormatter.reset(summer),
+            WidgetDateFormatter.reset(summer, timeZone: .autoupdatingCurrent))
+        XCTAssertEqual(WidgetDateFormatter.timeZoneLabel, TimeZone.autoupdatingCurrent.identifier)
     }
 
     func testCollapsedSummaryKeepsQuotaAndResetFromSameOverallWindow() {
@@ -512,7 +519,7 @@ struct QuotaChecks {
         tests.testRemainingBarsAndPaceDirection()
         tests.testTimeUnknownAndExpiredAreNotFabricated()
         tests.testQuotaColorsCompareRemainingQuotaWithRemainingTime()
-        tests.testExactResetDatesUseAmsterdamAndDaylightSaving()
+        tests.testExactResetDatesFollowTimeZoneAndDaylightSaving()
         tests.testCollapsedSummaryKeepsQuotaAndResetFromSameOverallWindow()
         tests.testCollapsedSummaryMissingExpiredAndNearResetAreTruthful()
         tests.testVerticalSummarySplitsDaysAndRemainingHours()

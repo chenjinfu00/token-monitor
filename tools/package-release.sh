@@ -26,7 +26,7 @@ plutil -lint "$plist"
 # Fail closed if a previous or modified bundle contains unexpected files.
 for bundle_file in "$app"/**/*(D.N); do
   case "${bundle_file#$app/}" in
-    Contents/Info.plist|Contents/MacOS/TokenMonitor|Contents/Resources/claude_bridge.py|Contents/Resources/Claude\ Login.command|Contents/_CodeSignature/CodeResources) ;;
+    Contents/Info.plist|Contents/Resources/LICENSE|Contents/MacOS/TokenMonitor|Contents/Resources/claude_bridge.py|Contents/Resources/Claude\ Login.command|Contents/_CodeSignature/CodeResources) ;;
     *) print -u2 "Unexpected file in release bundle: ${bundle_file#$app/}"; exit 1 ;;
   esac
 done

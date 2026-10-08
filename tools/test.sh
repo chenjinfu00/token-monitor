@@ -10,12 +10,12 @@ else
   exit 1
 fi
 mkdir -p .build/checks-cache
-swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
+xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
   Sources/TokenMonitor/Models.swift Sources/TokenMonitor/ResetNewsService.swift \
   Sources/TokenMonitor/ClaudeAuthProbe.swift Sources/TokenMonitor/ClaudeUsageProbe.swift \
   Tests/QuotaChecks.swift Tests/ClaudeUsageChecks.swift -o .build/QuotaChecks
 .build/QuotaChecks
-swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
+xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
   Sources/TokenMonitor/SingleInstanceLock.swift Tests/SingleInstanceChecks.swift -o .build/SingleInstanceChecks
 .build/SingleInstanceChecks
 "$token_monitor_python" -m unittest discover -s tools -p 'test_*.py'

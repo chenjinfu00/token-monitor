@@ -95,9 +95,11 @@ struct EdgeHandleView: View {
         var result = name + " · " + (summary.window?.name ?? "额度未知")
         result += " · 剩余 " + summary.percentText
         if let window = summary.window, summary.hoursText != "—", let reset = window.resetsAt {
-            result += "\n距离重置 " + summary.hoursText + " · " + WidgetDateFormatter.reset(reset) + " Europe/Amsterdam"
+            result += "\n距离重置 " + summary.hoursText + " · " + WidgetDateFormatter.reset(reset) + " " + WidgetDateFormatter.timeZoneLabel
+        } else if summary.window?.resetsAt == nil {
+            result += "\n重置时间待定"
         } else {
-            result += "\n重置时间未知或窗口已结束"
+            result += "\n窗口已结束 · 等待更新"
         }
         return result
     }
@@ -147,7 +149,7 @@ private struct EdgeQuotaGroup: View {
                 .foregroundStyle(Color.timeBlue)
                 .fixedSize(horizontal: true, vertical: false)
         }
-        Text(summary.hourComponentText)
+        Text(summary.window?.resetsAt == nil ? "待定" : summary.hourComponentText)
             .foregroundStyle(summary.hourComponentText == "—" ? Color.secondary : .timeBlue)
             .fixedSize(horizontal: true, vertical: false)
     }

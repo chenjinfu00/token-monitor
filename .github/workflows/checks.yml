@@ -1,0 +1,36 @@
+name: Check macOS app
+
+"on":
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "downloads/**"
+      - "*.md"
+      - "LICENSE"
+  pull_request:
+    paths-ignore:
+      - "downloads/**"
+      - "*.md"
+      - "LICENSE"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Test quota handling and Claude bridge
+        run: zsh tools/test.sh
+      - name: Build the universal app
+        run: zsh build.sh --universal
