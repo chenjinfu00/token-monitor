@@ -1,0 +1,54 @@
+name: Release macOS app
+
+"on":
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-14
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the release source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Test quota handling and Claude bridge
+        run: zsh tools/test.sh
+
+      - name: Build and package the universal app
+        run: zsh tools/package-release.sh
+
+      - name: Verify the version and publish downloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' 'dist/Token Monitor.app/Contents/Info.plist')
+          if [[ "$RELEASE_TAG" != "v$version" ]]; then
+            echo 'The tag does not match the packaged app version.' >&2
+            exit 1
+          fi
+          assets=(dist/release/*.zip dist/release/SHA256SUMS.txt)
+          for image in dist/release/*.dmg; do
+            if [[ -f "$image" ]]; then assets+=("$image"); fi
+          done
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$RELEASE_TAG" "${assets[@]}" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "Token Monitor $version" --notes-file RELEASE_NOTES.md
+          fi
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest --notes-file RELEASE_NOTES.md

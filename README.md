@@ -1,0 +1,110 @@
+# Token Monitor
+
+macOS 屏幕常驻小窗，显示 **Codex 与 Claude Code 的编程订阅剩余额度和重置时间**。原生毛玻璃背景，可拖动、隐藏，或收起为屏幕边缘的 48 像素缩略窗。
+
+显示的是服务返回的额度百分比，不是精确 token 数，也不覆盖普通 ChatGPT 网页聊天的所有用量。需要 macOS 13 或更新版本。
+
+## 下载与安装
+
+1. 在 [Releases](https://github.com/chenjinfu00/token-monitor/releases/latest) 下载 macOS 安装包。
+2. ZIP 解压后，将 **Token Monitor.app** 拖到 Finder 的“应用程序”。如果下载的是 DMG，打开后将应用拖到“应用程序”。
+3. 从“应用程序”双击 **Token Monitor**。应用会显示悬浮窗和菜单栏仪表图标，不显示 Dock 图标。
+
+当前版本使用 ad-hoc 签名，尚未通过 Apple 公证。首次打开若提示开发者无法验证，确认下载来源后，先尝试打开一次，再到“系统设置 → 隐私与安全性”选择“仍要打开”，按提示确认。详见 [Apple 的打开说明](https://support.apple.com/en-us/102445)。
+
+应用本身不需要 API key，但需要本机官方工具已有的订阅登录：
+
+- **Codex**：安装并登录 [官方 Codex](https://learn.chatgpt.com/docs/codex/cli)。应用可发现常见位置的 Codex CLI 和 Codex 桌面应用内置 CLI；API key 登录不一定提供订阅额度。
+- **Claude**：安装并登录 [官方 Claude Code CLI](https://code.claude.com/docs/en/quickstart)，使用 Claude 订阅认证。Claude 桌面应用和终端 CLI 的登录会话可能不同；只登录桌面应用不足以保证这里可以查询。
+
+无需在 Token Monitor 中重复登录已有的有效账户。未安装、未登录或当前官方工具不支持读取额度时，会显示等待或错误说明；点击对应的 **i** 查看详情。需要重新登录 Claude Code 时，可从菜单栏选择“登录终端 Claude Code”，在官方登录页面自行完成授权。
+
+## 日常使用
+
+- 拖动品牌标题或顶部留白移动窗口，位置会保存；**i** 和日期可点击查看同步状态、周期及重置详情。
+- 点击 Codex 行的刷新按钮，或菜单栏“立即同步”，尝试立即查询。正常每 60 秒同步一次，电脑唤醒后也会尝试更新；倒计时每秒变化。
+- 点击收起按钮，或菜单栏“收起到屏幕边缘”，贴到当前显示屏较近的左边或右边。缩略窗宽 **48 像素**，Codex 在上、Claude 在下，竖排显示图标、剩余百分比、天数和小时；未满一天省略天数。每家选剩余额度最少的整体周期，百分比与倒计时来自同一周期。点击缩略窗展开，悬停可查看详情。收起期间继续同步，收起状态在重启后保留。
+- 缩略窗可按住拖动，拖到屏幕上方时自动横排，靠近左右边缘时竖排；位置和方向会保存。轻点展开，拖动后不会误展开。小时数超过 10h 时显示整数，10h 以内保留一位小数。
+- 展开窗口靠着当前缩略窗出现，并保持在当前屏幕内；展开和收起有平滑过渡，开启系统“减少动态效果”时使用简化过渡。
+- 缩略窗末尾保留可点击的地球图标，打开 Codex Resets 公共重置信息；顶部横排时位于最右侧。
+- 应用使用单实例保护；再次打开会显示已有窗口，不会再启动一份后台采集。隐藏或收缩状态下重新打开，会恢复对应模式。
+- “隐藏小窗口”隐藏展开窗和缩略窗，继续后台同步。“显示小窗口”恢复上次模式；应用已隐藏时再次双击打开也会恢复显示。缩略窗已显示时，再次打开应用不会强制展开。
+- 菜单栏“紧凑 / 完整显示”切换显示周期数量；“退出 Token Monitor”停止后台同步并退出。可在 macOS“登录项”中添加应用，让它登录后自动打开。
+
+**重置日期固定使用 `Europe/Amsterdam` 时区，并自动处理夏令时。** 主界面显示月、日、时、分，不显示年份或秒；当前没有时区选择设置。
+
+额度条与蓝色时间条都表示 **剩余百分比**。额度比剩余时间多超过 5 个百分点时为绿，少至少 15 个百分点时为红，其余为黄；未知、周期不明或已经结束时为灰。这只是均匀使用节奏的参照，不能用来推算剩余 token。
+
+## 数据来源与新鲜度
+
+**Codex** 通过官方本机 CLI 的 `account/rateLimits/read` 读取账户额度与重置时间，支持服务返回的当前、每周和多个额度类别。额度下降后接近全额恢复且期限不变时，应用以本机观察时刻重建比较起点；公共网站消息不会修改账户期限或确认账户恢复。该比较起点在应用运行期间跟踪，重启后根据官方周期重新推算。
+
+**Claude 主动查询**默认每分钟启动官方 CLI，仅发送 `initialize` 和 `get_usage` 控制消息，不提交模型问题。查询进程使用 safe mode、禁用内置工具和非策略 MCP；组织管理策略仍然生效。只有同时取得可解析额度和服务端成功请求标志，才更新同步时间。超时、缓存无法确认或其他失败会保留上次确认值并显示原因；限流会自动退避。已验证 Claude Code **2.1.224** 的 Team 订阅查询，但控制协议及诊断标志可能随官方版本变化，不保证所有版本、计划或网关均支持。未返回的周期不会补成 0%。
+
+旧数据的更新时间保留，超过五分钟会标记较早快照。周期到期后显示等待更新，不会自动假设额度已经恢复。离线状态下仍可显示上次数据及其年龄。
+
+**公共重置信息**来自第三方 [Codex Resets 中文站](https://codex-resets.com/zh-CN)，通过其 [公开 API](https://codex-resets.com/api/docs) 的 `/api/v1/status` 查询，无需 key；每分钟使用 ETag 条件请求，处理缓存年龄与限流。来源链接始终显示。该网站与 OpenAI 无关联，其记录、备用重置机会及概率不能证明你的账户已恢复，应用也不会自动兑换重置机会。
+
+紫色网站时间条仅在接口给出**常规重置公告和明确、有效的未来 `scheduled_for`** 时显示，从公告时刻到目标时刻展示剩余时间。没有明确时间、公告已到期、网站数据过旧或查询失败时完全隐藏。历史平均、概率、自然语言时间范围、监测过期时间和备用重置发放均不会生成时间条。
+
+## 可选：Claude 状态栏推送
+
+菜单栏“Claude 读取方式”可切换“主动查询（每分钟）”与“状态栏推送”。主动查询无需安装采集器，也不读取 Claude 桌面历史文件。
+
+状态栏模式需要 Python 3，以及“启用终端 Claude 额度采集”。这会在 `~/.claude/settings.json` 添加可还原采集器，备份原设置，保留其他字段和已有 statusline 的执行。它只采集实际收到的 `rate_limits`，每两秒读取本地快照；这是响应驱动的来源，状态栏定时刷新不能使额度变新。官方 [statusline 文档](https://code.claude.com/docs/en/statusline) 当前列出 Pro/Max 和指定 gateway；其他计划是否返回额度以实际回调为准。
+
+正常 Claude Code 回复后才可能收到额度。应用区分尚无回调、有回调但无额度、已收到额度；其他设备或空闲会话的用量可能要等下一次响应才能反映。主动查询与状态栏快照不会拼接。相同未过期窗口内的较低使用量会保守保留原较高值，重复回调不刷新快照时间；特殊的官方修正可能要等窗口重置才反映。此模式按单账户使用设计，多账户不要共用快照目录。
+
+从源码目录手动连接、检查或解除连接：
+
+```sh
+python3 tools/claude_bridge.py install
+python3 tools/claude_bridge.py --status
+python3 tools/claude_bridge.py uninstall
+```
+
+解除连接只还原仍属于本工具的 statusline，保留用户之后修改的其他字段或替换的 statusline。安装的脚本及设置备份保留在 `~/.claude/token-monitor/`；备份是原配置的副本，应和原配置一样保管。脚本独立于应用位置，移动或删除应用不会自动解除连接。
+
+## 隐私与本地文件
+
+主动查询通过官方 CLI 完成认证及刷新，不自行提取认证 token。不会发送模型请求，不上传对话或额度给公共重置网站。Claude 查询诊断只在进程内识别白名单成功/失败标志，原日志不写入磁盘或展示。
+
+状态栏采集会写入以下私有文件，使用权限 `0600` 和原子替换；不保存对话、账户标识、密钥或完整 statusline 输入：
+
+- `~/Library/Application Support/Token Monitor/claude-quota.json`：额度百分比、重置时间和原始接收时间。
+- 同目录 `statusline-diagnostics.json`：回调、响应及额度字段是否存在等安全诊断。
+
+启用状态栏时保存的设置备份包含原 `settings.json` 的完整内容；不要把这些本地配置、备份或快照加入公开仓库。原有 statusline 会继续执行，并收到原始输入，行为由用户自己的命令决定。
+
+## 从源码构建
+
+需要 macOS 13+、Apple Swift 工具链，以及用于桥接测试的 Python 3；无第三方 Swift 或 Python 依赖。
+
+```sh
+git clone https://github.com/chenjinfu00/token-monitor.git
+cd token-monitor
+zsh tools/test.sh
+zsh build.sh
+```
+
+构建输出为 `dist/Token Monitor.app`。构建架构以构建脚本和发行版说明为准；下载发行包不需要 Swift 工具链。测试入口优先使用已有的 Anaconda Python，否则使用 `PATH` 中的 `python3`，不会安装依赖。测试只使用固定样例和临时目录，不访问账户、不发起模型请求，也不修改真实 Claude 设置。
+
+发布流程由 GitHub Actions 执行：版本标签（如 `v0.7.0`）触发构建、测试和发行包上传。当前没有自动更新，请从 Releases 下载新版本后替换应用。
+
+可在本机手动检查官方额度读取；这些命令会实际查询当前官方 CLI 账户，只输出白名单额度摘要：
+
+```sh
+"dist/Token Monitor.app/Contents/MacOS/TokenMonitor" --probe
+"dist/Token Monitor.app/Contents/MacOS/TokenMonitor" --claude-probe
+```
+
+`--demo` 仅供界面验证，使用带“演示”标记的数据。`TOKEN_MONITOR_CODEX` 可指定 Codex 可执行文件；`TOKEN_MONITOR_DATA_DIR` 可指定状态栏快照目录；`TOKEN_MONITOR_HOME` 仅供 Python 桥接安装测试。
+
+## 接口参考
+
+- [OpenAI Codex App Server](https://learn.chatgpt.com/docs/app-server)
+- [Claude Code 登录说明](https://code.claude.com/docs/en/authentication)
+- [Claude Code statusline](https://code.claude.com/docs/en/statusline)
+- [Codex Resets 公共 API 与署名要求](https://codex-resets.com/api/docs)
+
+这是独立开发的工具，与 OpenAI、Anthropic 和公共重置网站均无官方关联。

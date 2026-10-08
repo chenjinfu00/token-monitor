@@ -1,0 +1,26 @@
+.build/
+dist/
+.swiftpm/
+.typecheck-module-cache/
+.DS_Store
+*.dSYM/
+
+# Generated Python files.
+__pycache__/
+*.py[cod]
+
+# Local credentials, private snapshots, settings backups and logs.
+.env
+.env.*
+!.env.example
+.claude/
+.codex/
+.aws/
+.ssh/
+auth.json
+.credentials*.json
+claude-quota.json
+statusline-diagnostics.json
+install-state.json
+settings.backup.*.json
+*.log
