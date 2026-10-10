@@ -1,0 +1,2 @@
+21dead722273a3821dc3cd13fcc36a9a4060844c54fdf128729b9928960dd31f  Token-Monitor-0.7.3-macos-universal.zip
+b9e0ff633283a3b9fabc4850707006a4ea7bb78406c681bd935a49ec5d2cfa2e  Token-Monitor-0.7.3-macos-universal.dmg
