@@ -59,13 +59,13 @@ struct EdgeHandleView: View {
         Group {
             if edge == .top {
                 HStack(spacing: 12) {
-                    EdgeQuotaGroup(symbol: "terminal", brand: .codexGreen, summary: codex, horizontal: true)
-                    EdgeQuotaGroup(symbol: "sparkle", brand: .claudeOrange, summary: claude, horizontal: true)
+                    EdgeQuotaGroup(brand: .codex, summary: codex, horizontal: true)
+                    EdgeQuotaGroup(brand: .claude, summary: claude, horizontal: true)
                 }
             } else {
                 VStack(spacing: 12) {
-                    EdgeQuotaGroup(symbol: "terminal", brand: .codexGreen, summary: codex)
-                    EdgeQuotaGroup(symbol: "sparkle", brand: .claudeOrange, summary: claude)
+                    EdgeQuotaGroup(brand: .codex, summary: codex)
+                    EdgeQuotaGroup(brand: .claude, summary: claude)
                 }
             }
         }
@@ -106,8 +106,7 @@ struct EdgeHandleView: View {
 }
 
 private struct EdgeQuotaGroup: View {
-    let symbol: String
-    let brand: Color
+    let brand: ProviderBrand
     let summary: EdgeQuotaSummary
     var horizontal = false
 
@@ -132,10 +131,7 @@ private struct EdgeQuotaGroup: View {
     }
 
     private var brandSymbol: some View {
-        Image(systemName: symbol)
-            .resizable().scaledToFit()
-            .font(.system(size: 16, weight: .semibold))
-            .foregroundStyle(brand)
+        ProviderBrandIcon(brand: brand)
             .frame(width: 16, height: 16)
     }
 

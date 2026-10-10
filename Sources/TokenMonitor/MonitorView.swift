@@ -67,12 +67,12 @@ struct MonitorView: View {
         let connectAction: (() -> Void)? = !store.claudeUsesStatusLine || store.claudeConnected ? nil : { store.connectClaude() }
         let loginAction: (() -> Void)? = store.claudeNeedsLogin ? { store.loginClaude() } : nil
         return VStack(spacing: 6) {
-            ProviderCard(state: store.codex, accent: .codexGreen, symbol: "terminal",
+            ProviderCard(state: store.codex, accent: .codexGreen, brand: .codex,
                 compact: store.compact, now: now, sourceDescription: "Codex 官方服务端额度", websiteNews: store.resetNews,
                 refresh: refreshAction,
                 toggleEdge: onToggleEdge, close: onClose, onDoubleClick: onToggleEdge)
             Divider().opacity(0.35).padding(.horizontal, 8)
-            ProviderCard(state: store.claude, accent: .claudeOrange, symbol: "sparkle",
+            ProviderCard(state: store.claude, accent: .claudeOrange, brand: .claude,
                 compact: store.compact, now: now,
                 sourceDescription: store.claudeUsesStatusLine ? "Claude Code 状态栏回调" : "官方 Claude Code 服务端实时额度",
                 setupMessage: store.setupMessage, isConnecting: store.isConnectingClaude,
@@ -84,7 +84,7 @@ struct MonitorView: View {
 private struct ProviderCard: View {
     let state: ProviderState
     let accent: Color
-    let symbol: String
+    let brand: ProviderBrand
     let compact: Bool
     let now: Date
     let sourceDescription: String
@@ -119,8 +119,8 @@ private struct ProviderCard: View {
 
     private var header: some View {
         HStack(spacing: 5) {
-            Image(systemName: symbol).foregroundStyle(accent)
-                .font(.system(size: 15, weight: .semibold))
+            ProviderBrandIcon(brand: brand)
+                .frame(width: 22, height: 22)
                 .frame(width: 26, height: 26)
             Text(state.name.hasPrefix("Claude") ? "Claude" : "Codex")
                 .font(.system(size: 15, weight: .semibold))

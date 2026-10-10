@@ -26,6 +26,7 @@ app="$build_stage/Token Monitor.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$binary_directory/TokenMonitor" "$app/Contents/MacOS/TokenMonitor"
 cp LICENSE "$app/Contents/Resources/LICENSE"
+cp Design/BrandAssets/README.md "$app/Contents/Resources/BrandAssets.md"
 cp tools/claude_bridge.py "$app/Contents/Resources/claude_bridge.py"
 cp "tools/Claude Login.command" "$app/Contents/Resources/Claude Login.command"
 chmod +x "$app/Contents/Resources/Claude Login.command"
@@ -38,8 +39,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>Token Monitor</string>
 <key>CFBundleDisplayName</key><string>Token Monitor</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.7.1</string>
-<key>CFBundleVersion</key><string>15</string>
+<key>CFBundleShortVersionString</key><string>0.7.2</string>
+<key>CFBundleVersion</key><string>16</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>

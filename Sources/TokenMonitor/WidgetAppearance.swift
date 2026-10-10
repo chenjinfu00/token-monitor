@@ -17,6 +17,8 @@ extension Color {
         dark: NSColor(red: 0.35, green: 0.81, blue: 0.61, alpha: 1))
     static let claudeOrange = adaptive(light: NSColor(red: 0.72, green: 0.34, blue: 0.17, alpha: 1),
         dark: NSColor(red: 0.96, green: 0.64, blue: 0.45, alpha: 1))
+    static let claudeBrandOrange = adaptive(light: NSColor(red: 0.851, green: 0.467, blue: 0.341, alpha: 1),
+        dark: NSColor(red: 0.96, green: 0.64, blue: 0.45, alpha: 1))
     static let timeBlue = adaptive(light: NSColor(red: 0.13, green: 0.39, blue: 0.74, alpha: 1),
         dark: NSColor(red: 0.42, green: 0.68, blue: 1.00, alpha: 1))
     static let paceYellow = adaptive(light: NSColor(red: 0.66, green: 0.43, blue: 0.03, alpha: 1),
