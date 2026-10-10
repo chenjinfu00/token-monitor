@@ -103,15 +103,30 @@ private struct ProviderCard: View {
     private var status: String {
         [state.message, setupMessage].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
     }
+    private var reference: WebsiteResetReference? {
+        guard let news = websiteNews, news.canShowReference(at: now) else { return nil }
+        return news.reference
+    }
 
     var body: some View {
         VStack(spacing: 8) {
             header
-            VStack(spacing: WidgetLayout.rowSpacing) {
-                ForEach(windows) { window in quotaWindow(window) }
-                if let news = websiteNews, let reference = news.reference, news.canShowReference(at: now) {
-                    websiteReference(reference)
+            HStack(alignment: .center, spacing: WidgetLayout.columnSpacing) {
+                VStack(spacing: WidgetLayout.rowSpacing) {
+                    ForEach(windows) { window in quotaTime(window) }
+                    if let reference { websiteReference(reference) }
                 }
+                .frame(width: WidgetLayout.dateColumnWidth, alignment: .leading)
+                VStack(spacing: WidgetLayout.rowSpacing) {
+                    ForEach(windows) { window in quotaWindow(window) }
+                    if let reference {
+                        RatioRow(kind: .hourglass, label: "网站预测窗口剩余", remaining: reference.remainingPercent(at: now),
+                            unavailable: "网站未提供预测时间", color: .websitePurple)
+                            .accessibilityLabel("网站预测窗口剩余 " + percentageLabel(reference.remainingPercent(at: now))
+                                + "；" + reference.description(at: now) + "；网站预测并非账户确认的重置时间")
+                    }
+                }
+                .frame(maxWidth: .infinity)
             }
         }
         .padding(.vertical, 2)
@@ -175,33 +190,27 @@ private struct ProviderCard: View {
         .frame(minHeight: 30)
     }
 
+    private func quotaTime(_ window: QuotaWindow) -> some View {
+        ResetTimeButton(slotLabel: shortWindow(window), title: window.name + " · 重置时间",
+            timestamp: window.resetsAt, now: now, description: resetDescription(window))
+    }
+
     private func quotaWindow(_ window: QuotaWindow) -> some View {
         let expired = window.isExpired(at: now)
-        return HStack(alignment: .top, spacing: WidgetLayout.columnSpacing) {
-            ResetTimeButton(slotLabel: shortWindow(window), title: window.name + " · 重置时间",
-                timestamp: window.resetsAt, now: now, description: resetDescription(window))
-                .frame(width: WidgetLayout.dateColumnWidth, alignment: .leading)
-            VStack(spacing: WidgetLayout.rowSpacing) {
-                RatioRow(kind: .battery, label: "额度剩余", remaining: expired ? nil : window.remainingPercent,
-                    unavailable: expired ? "窗口已结束，等待更新" : "尚未获取额度",
-                    color: quotaColor(window.paceLevel(at: now)))
-                RatioRow(kind: .hourglass, label: "时间剩余", remaining: expired ? nil : window.timeRemainingPercent(at: now),
-                    unavailable: expired ? "窗口已结束，等待更新" : "周期未知，暂不比较", color: .timeBlue)
-            }
+        return VStack(spacing: WidgetLayout.rowSpacing) {
+            RatioRow(kind: .battery, label: "额度剩余", remaining: expired ? nil : window.remainingPercent,
+                unavailable: expired ? "窗口已结束，等待更新" : "尚未获取额度",
+                color: quotaColor(window.paceLevel(at: now)))
+            RatioRow(kind: .hourglass, label: "时间剩余", remaining: expired ? nil : window.timeRemainingPercent(at: now),
+                unavailable: expired ? "窗口已结束，等待更新" : "周期未知，暂不比较", color: .timeBlue)
         }
     }
 
     private func websiteReference(_ reference: WebsiteResetReference) -> some View {
-        HStack(alignment: .top, spacing: WidgetLayout.columnSpacing) {
-            ResetTimeButton(slotLabel: "预测", title: "网站预测时间", timestamp: reference.referenceAt,
-                now: now,
-                description: reference.description(at: now) + "\n" + websiteReferenceDescription(reference, sourceURL: websiteNews?.sourceURL),
-                color: .websitePurple)
-                .frame(width: WidgetLayout.dateColumnWidth, alignment: .leading)
-            RatioRow(kind: .hourglass, label: "网站预测窗口剩余", remaining: reference.remainingPercent(at: now),
-                unavailable: "网站未提供预测时间", color: .websitePurple)
-        }
-        .accessibilityLabel(reference.description(at: now) + "；网站预测并非账户确认的重置时间")
+        ResetTimeButton(slotLabel: "预测", title: "网站预测时间", timestamp: reference.referenceAt,
+            now: now,
+            description: reference.description(at: now) + "\n" + websiteReferenceDescription(reference, sourceURL: websiteNews?.sourceURL),
+            color: .websitePurple)
     }
 
     private func resetDescription(_ window: QuotaWindow) -> String {

@@ -10,7 +10,7 @@ macOS 屏幕常驻小窗，显示 **Codex 与 Claude Code 的编程订阅剩余�
 
 1. 下载 [DMG 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.7.4/Token-Monitor-0.7.4-macos-universal.dmg) 或 [ZIP 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.7.4/Token-Monitor-0.7.4-macos-universal.zip)。两者同时支持 Apple Silicon 与 Intel。
 2. ZIP 解压后，将 **Token Monitor.app** 拖到 Finder 的“应用程序”。如果下载的是 DMG，打开后将应用拖到“应用程序”。
-3. 从“应用程序”双击 **Token Monitor**。应用会显示悬浮窗和菜单栏仪表图标，不显示 Dock 图标。
+3. 从“应用程序”双击 **Token Monitor**。应用会显示悬浮窗和菜单栏双行额度图标，旁边标有“额度”，不显示 Dock 图标。
 
 当前版本使用 ad-hoc 签名，尚未通过 Apple 公证。首次打开若提示开发者无法验证，确认下载来源后，先尝试打开一次，再到“系统设置 → 隐私与安全性”选择“仍要打开”，按提示确认。详见 [Apple 的打开说明](https://support.apple.com/en-us/102445)。
 
@@ -51,7 +51,7 @@ python3 "$HOME/.claude/token-monitor/bridge.py" uninstall
 
 ## 日常使用
 
-- 展开窗宽 340 点，紧凑模式为 320 点。日期、倒计时与进度条逐行对齐；普通额度与公共预测条使用相同的纵向间隔。
+- 展开窗宽 340 点，紧凑模式为 320 点。左侧排列日期与倒计时，右侧进度条整体垂直居中；普通额度与公共预测条使用相同的纵向间隔。
 - 拖动品牌标题或顶部留白移动窗口，位置会保存；双击标题或留白收起。**i** 和日期可点击查看同步状态、周期及重置详情。
 - 点击 Codex 行的刷新按钮，或菜单栏“立即同步”，尝试立即查询。正常每 60 秒同步一次，电脑唤醒后也会尝试更新；倒计时每秒变化。
 - 点击收起按钮，或菜单栏“收起到屏幕边缘”，贴到当前显示屏较近的边缘。缩略窗宽 **48 像素**，Codex 在上、Claude 在下，竖排显示图标、剩余百分比、天数和小时；未满一天省略天数。每家选剩余额度最少的整体周期，百分比与倒计时来自同一周期。双击缩略窗展开，悬停可查看详情。收起期间继续同步，收起状态在重启后保留。
