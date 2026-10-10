@@ -138,6 +138,7 @@ private struct ProviderCard: View {
                     Text("\(count)").monospacedDigit()
                 }
                 .font(.system(size: 14, weight: .medium))
+                .fixedSize(horizontal: true, vertical: false)
                 .foregroundStyle(accent)
                 .help("官方同步的提前重置机会：\(count)次")
                 .accessibilityLabel("提前重置机会 \(count)次")
@@ -151,7 +152,7 @@ private struct ProviderCard: View {
                 .frame(minHeight: 26)
                 .overlay { NativeWindowDragRegion(onDoubleClick: onDoubleClick) }
                 .help("双击收起额度小窗 · 拖动可移动")
-            if state.isLoading {
+            if state.isLoading && refresh == nil {
                 ProgressView().controlSize(.small)
                     .frame(width: 16, height: 16).accessibilityLabel("正在同步额度")
             }
@@ -162,7 +163,9 @@ private struct ProviderCard: View {
             if let login {
                 IconAction(symbol: "person.crop.circle", label: "登录 Claude Code", action: login)
             }
-            if let refresh { IconAction(symbol: "arrow.clockwise", label: "立即刷新额度", action: refresh) }
+            if let refresh {
+                IconAction(symbol: "arrow.clockwise", label: "立即刷新额度", isLoading: state.isLoading, action: refresh)
+            }
             if let toggleEdge { IconAction(symbol: "sidebar.right", label: "收起到屏幕边缘", action: toggleEdge) }
             if let close { IconAction(symbol: "xmark", label: "隐藏悬浮窗", action: close) }
         }
@@ -395,17 +398,28 @@ private struct IconAction: View {
     let symbol: String
     let label: String
     var color: Color = .primary
+    var isLoading = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(color).frame(width: 32, height: 32)
+                .foregroundStyle(color)
+                .opacity(isLoading ? 0 : 1)
+                .frame(width: 32, height: 32)
+                .overlay {
+                    if isLoading {
+                        ProgressView().progressViewStyle(.circular).controlSize(.small)
+                            .frame(width: 16, height: 16)
+                            .allowsHitTesting(false)
+                    }
+                }
                 .contentShape(Circle())
         }
         .buttonStyle(GlassIconButtonStyle())
-        .help(label)
-        .accessibilityLabel(label)
+        .disabled(isLoading)
+        .help(isLoading ? "正在同步额度…" : label)
+        .accessibilityLabel(isLoading ? "正在同步额度" : label)
     }
 }
 
