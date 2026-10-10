@@ -57,7 +57,7 @@ enum CodexProbe {
         }
         try send(["id": 0, "method": "initialize", "params": [
             "clientInfo": ["name": "token_monitor", "title": "Token Monitor",
-                "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.7.3"]
+                "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.7.4"]
         ]])
         let deadline = Date().addingTimeInterval(timeout)
         let fd = output.fileHandleForReading.fileDescriptor

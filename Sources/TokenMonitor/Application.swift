@@ -80,7 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var transitionStep: ((CGFloat) -> Void)?
     private var transitionCompletion: (() -> Void)?
 
-    private var preferredWidth: CGFloat { store.compact ? 360 : 390 }
+    private var preferredWidth: CGFloat { WidgetLayout.panelWidth(compact: store.compact) }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         store = MonitorStore(demo: CommandLine.arguments.contains("--demo"))

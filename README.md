@@ -2,13 +2,13 @@
 
 macOS 屏幕常驻小窗，显示 **Codex 与 Claude Code 的编程订阅剩余额度和重置时间**。品牌图标使用原版结形和放射形的透明矢量，没有图标底框。原生毛玻璃背景，可拖动、隐藏，或收起为屏幕边缘的 48 像素缩略窗。
 
-[下载 DMG](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.7.3/Token-Monitor-0.7.3-macos-universal.dmg) · [安装与登录](#下载与安装) · [MIT 许可证](LICENSE)
+[下载 DMG](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.7.4/Token-Monitor-0.7.4-macos-universal.dmg) · [安装与登录](#下载与安装) · [MIT 许可证](LICENSE)
 
 显示的是服务返回的额度百分比，不是精确 token 数，也不覆盖普通 ChatGPT 网页聊天的所有用量。需要 macOS 13 或更新版本。
 
 ## 下载与安装
 
-1. 下载 [DMG 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.7.3/Token-Monitor-0.7.3-macos-universal.dmg) 或 [ZIP 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.7.3/Token-Monitor-0.7.3-macos-universal.zip)。两者同时支持 Apple Silicon 与 Intel。
+1. 下载 [DMG 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.7.4/Token-Monitor-0.7.4-macos-universal.dmg) 或 [ZIP 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.7.4/Token-Monitor-0.7.4-macos-universal.zip)。两者同时支持 Apple Silicon 与 Intel。
 2. ZIP 解压后，将 **Token Monitor.app** 拖到 Finder 的“应用程序”。如果下载的是 DMG，打开后将应用拖到“应用程序”。
 3. 从“应用程序”双击 **Token Monitor**。应用会显示悬浮窗和菜单栏仪表图标，不显示 Dock 图标。
 
@@ -51,6 +51,7 @@ python3 "$HOME/.claude/token-monitor/bridge.py" uninstall
 
 ## 日常使用
 
+- 展开窗宽 340 点，紧凑模式为 320 点。日期、倒计时与进度条逐行对齐；普通额度与公共预测条使用相同的纵向间隔。
 - 拖动品牌标题或顶部留白移动窗口，位置会保存；双击标题或留白收起。**i** 和日期可点击查看同步状态、周期及重置详情。
 - 点击 Codex 行的刷新按钮，或菜单栏“立即同步”，尝试立即查询。正常每 60 秒同步一次，电脑唤醒后也会尝试更新；倒计时每秒变化。
 - 点击收起按钮，或菜单栏“收起到屏幕边缘”，贴到当前显示屏较近的边缘。缩略窗宽 **48 像素**，Codex 在上、Claude 在下，竖排显示图标、剩余百分比、天数和小时；未满一天省略天数。每家选剩余额度最少的整体周期，百分比与倒计时来自同一周期。双击缩略窗展开，悬停可查看详情。收起期间继续同步，收起状态在重启后保留。
@@ -119,12 +120,12 @@ zsh build.sh
 
 构建输出为 `dist/Token Monitor.app`，默认构建当前电脑的架构。构建 Intel + Apple Silicon 通用应用使用 `zsh build.sh --universal`；生成可下载的 ZIP、DMG 和校验文件使用 `zsh tools/package-release.sh`。下载发行包不需要 Swift 工具链。测试入口优先使用已有的 Anaconda Python，否则使用 `PATH` 中的 `python3`，不会安装依赖。测试只使用固定样例和临时目录，不访问账户、不发起模型请求，也不修改真实 Claude 设置。
 
-当前安装包保存在 [`downloads/v0.7.3/`](downloads/v0.7.3/)，同目录提供 `SHA256SUMS.txt`。另提供 GitHub Actions 发行工作流：推送版本标签（如 `v0.7.3`）后测试、构建并上传到 Releases。主分支和 Pull Request 的独立检查只测试及构建，不发布安装包。当前没有自动更新，请从仓库下载新版本后替换应用。
+当前安装包保存在 [`downloads/v0.7.4/`](downloads/v0.7.4/)，同目录提供 `SHA256SUMS.txt`。另提供 GitHub Actions 发行工作流：推送版本标签（如 `v0.7.4`）后测试、构建并上传到 Releases。主分支和 Pull Request 的独立检查只测试及构建，不发布安装包。当前没有自动更新，请从仓库下载新版本后替换应用。
 
 校验单个下载文件时，在终端进入下载目录并运行：
 
 ```sh
-shasum -a 256 Token-Monitor-0.7.3-macos-universal.dmg
+shasum -a 256 Token-Monitor-0.7.4-macos-universal.dmg
 ```
 
 将输出与同目录 `SHA256SUMS.txt` 的 DMG 那一行比较；ZIP 同理，只需检查自己下载的文件。安装包目录的 `BUILD_INFO.md` 记录源码提交、构建版本与架构。

@@ -1,6 +1,16 @@
 import SwiftUI
 import AppKit
 
+enum WidgetLayout {
+    static func panelWidth(compact: Bool) -> CGFloat { compact ? 320 : 340 }
+    static func providerHeightLimit(compact: Bool) -> CGFloat { compact ? 340 : 360 }
+    static let panelInset: CGFloat = 12
+    static let rowHeight: CGFloat = 18
+    static let rowSpacing: CGFloat = 6
+    static let dateColumnWidth: CGFloat = 94
+    static let columnSpacing: CGFloat = 4
+}
+
 enum WidgetAppearance {
     static func quotaColor(_ pace: QuotaPace) -> Color {
         switch pace {

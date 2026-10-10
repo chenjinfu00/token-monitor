@@ -16,12 +16,12 @@ struct MonitorView: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
-            VStack(spacing: 7) {
+            VStack(spacing: 8) {
                 providerArea(at: context.date)
                 ResetNewsRow(state: store.resetNews, now: context.date)
             }
-            .padding(10)
-            .frame(width: store.compact ? 360 : 390)
+            .padding(WidgetLayout.panelInset)
+            .frame(width: WidgetLayout.panelWidth(compact: store.compact))
             .fixedSize(horizontal: false, vertical: true)
             .background {
                 GeometryReader { geometry in
@@ -39,7 +39,7 @@ struct MonitorView: View {
     }
 
     private func providerArea(at now: Date) -> some View {
-        let heightCap: CGFloat = store.compact ? 270 : 300
+        let heightCap = WidgetLayout.providerHeightLimit(compact: store.compact)
         let cards = providerCards(at: now)
             .fixedSize(horizontal: false, vertical: true)
             .background {
@@ -66,12 +66,12 @@ struct MonitorView: View {
         let refreshAction: () -> Void = { store.refreshNow(force: true) }
         let connectAction: (() -> Void)? = !store.claudeUsesStatusLine || store.claudeConnected ? nil : { store.connectClaude() }
         let loginAction: (() -> Void)? = store.claudeNeedsLogin ? { store.loginClaude() } : nil
-        return VStack(spacing: 6) {
+        return VStack(spacing: 8) {
             ProviderCard(state: store.codex, accent: .codexGreen, brand: .codex,
                 compact: store.compact, now: now, sourceDescription: "Codex 官方服务端额度", websiteNews: store.resetNews,
                 refresh: refreshAction,
                 toggleEdge: onToggleEdge, close: onClose, onDoubleClick: onToggleEdge)
-            Divider().opacity(0.35).padding(.horizontal, 8)
+            Divider().opacity(0.28)
             ProviderCard(state: store.claude, accent: .claudeOrange, brand: .claude,
                 compact: store.compact, now: now,
                 sourceDescription: store.claudeUsesStatusLine ? "Claude Code 状态栏回调" : "官方 Claude Code 服务端实时额度",
@@ -105,20 +105,21 @@ private struct ProviderCard: View {
     }
 
     var body: some View {
-        VStack(spacing: compact ? 5 : 6) {
+        VStack(spacing: 8) {
             header
-            ForEach(windows) { window in quotaWindow(window) }
-            if let news = websiteNews, let reference = news.reference, news.canShowReference(at: now) {
-                websiteReference(reference)
+            VStack(spacing: WidgetLayout.rowSpacing) {
+                ForEach(windows) { window in quotaWindow(window) }
+                if let news = websiteNews, let reference = news.reference, news.canShowReference(at: now) {
+                    websiteReference(reference)
+                }
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 3)
+        .padding(.vertical, 2)
         .frame(maxWidth: .infinity)
     }
 
     private var header: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 4) {
             ProviderBrandIcon(brand: brand)
                 .frame(width: 22, height: 22)
                 .frame(width: 26, height: 26)
@@ -127,10 +128,12 @@ private struct ProviderCard: View {
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
                 .frame(minWidth: 40, minHeight: 26, alignment: .leading)
+                .fixedSize(horizontal: true, vertical: false)
                 .help(state.name + "\n" + state.ageText(at: now) + "\n双击收起额度小窗 · 拖动可移动")
                 .overlay { NativeWindowDragRegion(onDoubleClick: onDoubleClick) }
             if state.name.contains("演示") {
                 Text("演示").font(.system(size: 12)).foregroundStyle(.secondary)
+                    .lineLimit(1).fixedSize(horizontal: true, vertical: false)
             }
             if let count = state.resetCreditCount {
                 HStack(spacing: 2) {
@@ -174,11 +177,11 @@ private struct ProviderCard: View {
 
     private func quotaWindow(_ window: QuotaWindow) -> some View {
         let expired = window.isExpired(at: now)
-        return HStack(spacing: 3) {
+        return HStack(alignment: .top, spacing: WidgetLayout.columnSpacing) {
             ResetTimeButton(slotLabel: shortWindow(window), title: window.name + " · 重置时间",
                 timestamp: window.resetsAt, now: now, description: resetDescription(window))
-                .frame(width: 94, alignment: .leading)
-            VStack(spacing: 3) {
+                .frame(width: WidgetLayout.dateColumnWidth, alignment: .leading)
+            VStack(spacing: WidgetLayout.rowSpacing) {
                 RatioRow(kind: .battery, label: "额度剩余", remaining: expired ? nil : window.remainingPercent,
                     unavailable: expired ? "窗口已结束，等待更新" : "尚未获取额度",
                     color: quotaColor(window.paceLevel(at: now)))
@@ -186,20 +189,18 @@ private struct ProviderCard: View {
                     unavailable: expired ? "窗口已结束，等待更新" : "周期未知，暂不比较", color: .timeBlue)
             }
         }
-        .padding(.vertical, 2)
     }
 
     private func websiteReference(_ reference: WebsiteResetReference) -> some View {
-        HStack(spacing: 3) {
+        HStack(alignment: .top, spacing: WidgetLayout.columnSpacing) {
             ResetTimeButton(slotLabel: "预测", title: "网站预测时间", timestamp: reference.referenceAt,
                 now: now,
                 description: reference.description(at: now) + "\n" + websiteReferenceDescription(reference, sourceURL: websiteNews?.sourceURL),
                 color: .websitePurple)
-                .frame(width: 94, alignment: .leading)
+                .frame(width: WidgetLayout.dateColumnWidth, alignment: .leading)
             RatioRow(kind: .hourglass, label: "网站预测窗口剩余", remaining: reference.remainingPercent(at: now),
                 unavailable: "网站未提供预测时间", color: .websitePurple)
         }
-        .padding(.vertical, 2)
         .accessibilityLabel(reference.description(at: now) + "；网站预测并非账户确认的重置时间")
     }
 
@@ -264,6 +265,7 @@ private struct RatioRow: View {
                 .lineLimit(1)
                 .frame(width: 44, alignment: .trailing)
         }
+        .frame(height: WidgetLayout.rowHeight)
         .help(tooltip)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(remaining.map { label + " " + percentageLabel($0) } ?? unavailable)
@@ -312,7 +314,7 @@ private struct RatioGlyph: View {
         }
         .font(.system(size: 16, weight: .medium))
         .symbolRenderingMode(.monochrome)
-        .frame(width: 22, height: 18)
+        .frame(width: 22, height: WidgetLayout.rowHeight)
         .accessibilityHidden(true)
     }
 }
@@ -324,14 +326,14 @@ private struct QuotaBar: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.secondary.opacity(0.2))
+                Capsule().fill(Color.primary.opacity(0.09))
                 if let remaining {
                     Capsule().fill(color)
                         .frame(width: geometry.size.width * max(0, min(100, remaining)) / 100)
                 }
             }
         }
-        .frame(height: 6)
+        .frame(height: 5)
         .accessibilityHidden(true)
     }
 }
@@ -354,7 +356,7 @@ private struct ResetNewsRow: View {
                         Image(systemName: "globe").font(.system(size: 15, weight: .medium))
                         Text(sourceHost)
                     }
-                    .font(.system(size: 13, weight: .medium)).foregroundStyle(.primary)
+                    .font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
                     .frame(minHeight: 30)
                 }
                 .buttonStyle(.plain)
@@ -370,7 +372,6 @@ private struct ResetNewsRow: View {
                 label: warning.isEmpty ? "查看公共重置消息与更新时间" : "查看公共重置消息与警告",
                 color: warning.isEmpty ? .secondary : .orange) { newsDetails }
         }
-        .padding(.horizontal, 4)
         .frame(minHeight: 30)
     }
 
@@ -467,13 +468,15 @@ private struct ResetTimeButton: View {
 
     var body: some View {
         Button { showsDetails.toggle() } label: {
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: WidgetLayout.rowSpacing) {
                 Text(timestamp.map { WidgetDateFormatter.shortReset($0) } ?? "待定")
                     .font(.system(size: 14, weight: .medium, design: .rounded))
                     .foregroundStyle(color)
+                    .frame(height: WidgetLayout.rowHeight, alignment: .leading)
                 Text(resetCountdown(timestamp, at: now))
                     .font(.system(size: 13, weight: .medium, design: .rounded))
                     .foregroundStyle(.secondary)
+                    .frame(height: WidgetLayout.rowHeight, alignment: .leading)
             }
             .monospacedDigit()
             .lineLimit(1)
@@ -525,7 +528,12 @@ private func resetCountdown(_ reset: Date?, at now: Date) -> String {
     let seconds = reset.timeIntervalSince(now)
     guard seconds > 0 else { return "等待更新" }
     let minutes = max(1, Int(ceil(seconds / 60)))
-    if minutes >= 1440 { return "还需\(minutes / 1440)天\((minutes % 1440) / 60)时" }
+    if minutes >= 1440 {
+        let days = minutes / 1440
+        // Keep unusually long countdowns readable at the same font size.
+        let prefix = days < 100 ? "还需" : ""
+        return "\(prefix)\(days)天\((minutes % 1440) / 60)时"
+    }
     if minutes >= 60 { return "还需\(minutes / 60)时\(minutes % 60)分" }
     return "还需\(minutes)分"
 }
