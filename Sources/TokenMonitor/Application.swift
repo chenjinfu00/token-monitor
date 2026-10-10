@@ -132,10 +132,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if isCollapsed { showHandle() } else { panel.orderFrontRegardless() }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "gauge.with.dots.needle.50percent", accessibilityDescription: "Token Monitor")
-        statusItem.button?.toolTip = "Codex 与 Claude Code 额度"
+        if let button = statusItem.button { MenuBarIcon.configure(button) }
         let menu = NSMenu()
         menu.delegate = self
+        menu.addItem(withTitle: "Token Monitor · 订阅额度", action: nil, keyEquivalent: "")
+        menu.addItem(.separator())
         let visibilityItem = menu.addItem(withTitle: "隐藏小窗口", action: #selector(togglePanel), keyEquivalent: "")
         visibilityItem.tag = 1
         let edgeItem = menu.addItem(withTitle: "收起到屏幕边缘", action: #selector(toggleEdge), keyEquivalent: "")
