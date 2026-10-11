@@ -21,5 +21,10 @@ xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks
 xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
   Sources/TokenMonitor/HistoryModels.swift Sources/TokenMonitor/ResetHistoryArchive.swift Sources/TokenMonitor/UsageHistoryRecorder.swift \
   Tests/HistoryChecks.swift -o .build/HistoryChecks
+xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
+  Sources/TokenMonitor/Models.swift Sources/TokenMonitor/ResetNewsService.swift \
+  Sources/TokenMonitor/HistoryModels.swift Sources/TokenMonitor/QuotaPacingGuide.swift \
+  Tests/PacingGuideChecks.swift -o .build/PacingGuideChecks
+.build/PacingGuideChecks
 .build/HistoryChecks
 "$token_monitor_python" -m unittest discover -s tools -p 'test_*.py'

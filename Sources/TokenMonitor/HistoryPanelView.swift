@@ -30,6 +30,19 @@ struct HistoryPanelView: View {
 
     private var range: DateInterval { scale.range(containing: referenceDate) }
     private var accent: Color { provider == .codex ? .codexGreen : .claudeOrange }
+    private var pacingGuides: [QuotaPacingGuide] {
+        guard let window = history.liveWindows[provider]?.first(where: { $0.id == effectiveWindowID }) else { return [] }
+        return QuotaPacingGuide.make(provider: provider, window: window, resetHistory: history.resetHistory,
+                                    reference: history.websiteReference, at: latestDate)
+    }
+    private var timelineEnd: Date {
+        guard let target = pacingGuides.first(where: { $0.source == .official })?.targetAt else { return latestDate }
+        return target.addingTimeInterval(range.duration * 0.08)
+    }
+    private var presentEnd: Date {
+        guard let target = pacingGuides.first(where: { $0.source == .official })?.targetAt else { return latestDate }
+        return latestDate.addingTimeInterval(min(target.timeIntervalSince(latestDate), range.duration * 0.35))
+    }
     private var windowOptions: [HistoryWindowOption] {
         knownWindows.filter { $0.provider == provider }.sorted { left, right in
             if left.duration != right.duration { return (left.duration ?? .greatestFiniteMagnitude) < (right.duration ?? .greatestFiniteMagnitude) }
@@ -61,7 +74,11 @@ struct HistoryPanelView: View {
         }
         return grouped.values.map { HistoryPlot.Event(events: $0) }.sorted { $0.observedAt < $1.observedAt }
     }
-    private var earliestDate: Date { min(history.firstRecordedAt ?? latestDate, history.resetHistory.map(\.observedAt).min() ?? latestDate) }
+    private var earliestDate: Date {
+        let recorded = min(history.firstRecordedAt ?? latestDate, history.resetHistory.map(\.observedAt).min() ?? latestDate)
+        let cycle = pacingGuides.map(\.startAt).min() ?? recorded
+        return min(recorded, cycle, scale.range(containing: presentEnd).start)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -74,16 +91,41 @@ struct HistoryPanelView: View {
         .padding(.top, 18)
         .padding(.bottom, 18)
         .frame(minWidth: 640, minHeight: 440)
-        .onAppear { rememberWindows(); rebuildSeries(); refreshVisibleRange(); history.refreshResetHistory() }
+        .onAppear {
+            latestDate = history.liveNow
+            rememberWindows()
+            if followsPresent { referenceDate = presentEnd }
+            rebuildSeries(); refreshVisibleRange(); history.refreshResetHistory()
+        }
         .onDisappear { renderTask?.cancel() }
+        .onChange(of: scale) { _ in if followsPresent { referenceDate = presentEnd } }
         .onChange(of: range) { _ in prepareSelectionForViewChange(); rebuildSeries(); refreshVisibleRange() }
-        .onChange(of: provider) { _ in prepareSelectionForViewChange(); rebuildSeries() }
-        .onChange(of: windowID) { _ in prepareSelectionForViewChange(); rebuildSeries() }
+        .onChange(of: provider) { _ in
+            if followsPresent { referenceDate = presentEnd }
+            else if referenceDate > timelineEnd { referenceDate = timelineEnd }
+            prepareSelectionForViewChange(); rebuildSeries()
+        }
+        .onChange(of: windowID) { _ in
+            if followsPresent { referenceDate = presentEnd }
+            else if referenceDate > timelineEnd { referenceDate = timelineEnd }
+            prepareSelectionForViewChange(); rebuildSeries()
+        }
         .onChange(of: history.records) { _ in rememberWindows(); rebuildSeries() }
         .onChange(of: history.resetHistory) { _ in rememberWindows(); rebuildSeries() }
+        .onChange(of: history.liveWindows) { _ in
+            rememberWindows()
+            if followsPresent { referenceDate = presentEnd }
+            else if referenceDate > timelineEnd { referenceDate = timelineEnd }
+        }
+        .onChange(of: history.websiteReference) { _ in if followsPresent { referenceDate = presentEnd } }
+        .onChange(of: history.liveNow) { now in
+            latestDate = now
+            if followsPresent { referenceDate = presentEnd }
+            else if referenceDate > timelineEnd { referenceDate = timelineEnd }
+        }
         .onChange(of: history.revision) { _ in
-            latestDate = Date()
-            if followsPresent { referenceDate = latestDate }
+            latestDate = history.liveNow
+            if followsPresent { referenceDate = presentEnd }
             refreshVisibleRange()
         }
     }
@@ -156,7 +198,7 @@ struct HistoryPanelView: View {
                 Text(scale.rangeTitle(range)).font(.system(size: 14, weight: .medium)).monospacedDigit()
                     .lineLimit(1).minimumScaleFactor(0.9)
                 Spacer(minLength: 3)
-                Button("现在") { followsPresent = true; latestDate = Date(); referenceDate = latestDate }
+                Button("现在") { followsPresent = true; latestDate = history.liveNow; referenceDate = presentEnd }
                     .buttonStyle(.plain).foregroundStyle(accent).font(.system(size: 13, weight: .medium))
                     .help("滚动到最新记录")
             }
@@ -164,7 +206,7 @@ struct HistoryPanelView: View {
     }
 
     @ViewBuilder private var chartArea: some View {
-        if history.firstRecordedAt == nil && history.records.isEmpty && history.resetHistory.isEmpty {
+        if history.firstRecordedAt == nil && history.records.isEmpty && history.resetHistory.isEmpty && pacingGuides.isEmpty {
             VStack(spacing: 9) {
                 Image(systemName: history.recordingEnabled ? "chart.xyaxis.line" : "pause.circle")
                     .font(.system(size: 30, weight: .light)).foregroundStyle(.secondary)
@@ -176,12 +218,12 @@ struct HistoryPanelView: View {
             .accessibilityElement(children: .combine)
         } else {
             ZStack {
-                HistoryScrollableChart(earliest: earliestDate, latest: latestDate,
+                HistoryScrollableChart(earliest: earliestDate, latest: timelineEnd,
                     visibleDuration: range.duration, visibleEnd: referenceDate, onVisibleEndChange: { end in
-                        followsPresent = abs(end.timeIntervalSince(latestDate)) < 1
+                        followsPresent = abs(end.timeIntervalSince(presentEnd)) < 1
                         referenceDate = end
                     }, content: historyChart.padding(.top, 6))
-                if matchingRecords.isEmpty && !history.isLoading {
+                if matchingRecords.isEmpty && pacingGuides.isEmpty && !history.isLoading {
                     Text("这段时间没有有效采样")
                         .font(.system(size: 13)).foregroundStyle(.secondary)
                         .allowsHitTesting(false)
@@ -195,7 +237,34 @@ struct HistoryPanelView: View {
     private var historyChart: some View {
         let values = cachedPlot
         let events = visibleEvents
+        let guides = pacingGuides
         return Chart {
+            if range.end > latestDate {
+                RectangleMark(xStart: .value("未来开始", max(range.start, latestDate)), xEnd: .value("未来结束", range.end),
+                              yStart: .value("额度下限", 0), yEnd: .value("额度上限", 100))
+                    .foregroundStyle(Color.secondary.opacity(0.035))
+            }
+            ForEach(guides) { guide in
+                ForEach(guide.clippedPoints(in: range), id: \.date) { point in
+                    LineMark(x: .value("参考时间", point.date), y: .value("线性额度参考", point.usedPercent),
+                             series: .value("连续采样段", guide.source == .official ? -1 : -2))
+                        .interpolationMethod(.linear)
+                        .lineStyle(StrokeStyle(lineWidth: 1.4, dash: [5, 4]))
+                        .foregroundStyle(guideColor(guide))
+                }
+                if guide.targetAt >= range.start && guide.targetAt <= range.end {
+                    RuleMark(x: .value("下次重置", guide.targetAt))
+                        .lineStyle(StrokeStyle(lineWidth: 0.8, dash: [2, 4]))
+                        .foregroundStyle(guideColor(guide).opacity(0.3))
+                    PointMark(x: .value("下次重置", guide.targetAt), y: .value("周期额度", 100))
+                        .symbolSize(28).foregroundStyle(guideColor(guide))
+                }
+            }
+            if latestDate >= range.start && latestDate <= range.end && range.end > latestDate {
+                RuleMark(x: .value("现在", latestDate))
+                    .lineStyle(StrokeStyle(lineWidth: 0.6))
+                    .foregroundStyle(Color.secondary.opacity(0.4))
+            }
             ForEach(values.points) { point in
                 LineMark(x: .value("记录区间", point.date), y: .value("已使用峰值", point.record.peakUsedPercent),
                          series: .value("连续采样段", point.segment))
@@ -259,7 +328,8 @@ struct HistoryPanelView: View {
         }
         .chartOverlay { proxy in
             GeometryReader { geometry in
-                Rectangle().fill(Color.clear).contentShape(Rectangle())
+                ZStack(alignment: .topLeading) {
+                    Rectangle().fill(Color.clear).contentShape(Rectangle())
                     .onContinuousHover { phase in
                         if case .active(let location) = phase {
                             inspect(at: location, proxy: proxy, geometry: geometry, plot: values)
@@ -270,11 +340,58 @@ struct HistoryPanelView: View {
                     }.onEnded { _ in
                         if selectedEvent != nil { showingEventDetails = true }
                     })
+                    pacingLabels(guides, proxy: proxy, geometry: geometry)
+                }
             }
         }
         .accessibilityLabel("\(provider == .codex ? "Codex" : "Claude") 已使用额度峰值图，纵轴百分之零至百分之一百")
         .accessibilityValue("显示 \(values.points.count) 个峰值点，最高 \(values.points.map { $0.record.peakUsedPercent }.max().map { percent($0) } ?? "待定")；移至折线查看记录详情")
         .help("鼠标移至折线查看峰值；点击底部菱形，查看每次额度恢复或重置计划的详细观测。")
+    }
+
+    private func guideColor(_ guide: QuotaPacingGuide) -> Color {
+        guide.source == .official ? .timeBlue : .websitePurple
+    }
+
+    private func guideLabelX(_ guide: QuotaPacingGuide, proxy: ChartProxy, frame: CGRect) -> CGFloat {
+        let inset: CGFloat = 61
+        let target = guide.targetAt >= range.start && guide.targetAt <= range.end
+            ? (proxy.position(forX: guide.targetAt).map { frame.minX + $0 } ?? frame.maxX - inset)
+            : frame.maxX - inset
+        return max(frame.minX + inset, min(frame.maxX - inset, target))
+    }
+
+    private func pacingLabels(_ guides: [QuotaPacingGuide], proxy: ChartProxy, geometry: GeometryProxy) -> some View {
+        let frame = geometry[proxy.plotAreaFrame]
+        let firstX = guides.first.map { guideLabelX($0, proxy: proxy, frame: frame) }
+        return ForEach(Array(guides.enumerated()), id: \.element.id) { index, guide in
+            let x = guideLabelX(guide, proxy: proxy, frame: frame)
+            let offset: CGFloat = index > 0 && abs(x - (firstX ?? x)) < 124 ? 23 : 0
+            Button { revealGuide(guide) } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: guide.source == .official ? "arrow.clockwise" : "globe")
+                        .font(.system(size: 11, weight: .medium))
+                    Text(WidgetDateFormatter.reset(guide.targetAt))
+                        .font(.system(size: 11, weight: .medium)).monospacedDigit()
+                        .lineLimit(1).fixedSize(horizontal: true, vertical: false)
+                }
+                .padding(.horizontal, 5).padding(.vertical, 3)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 5))
+            }
+            .buttonStyle(.plain).foregroundStyle(guideColor(guide))
+            .position(x: x, y: frame.minY + 14 + offset)
+            .help("\(guide.source == .official ? "官方重置" : "Codex Reset 提前预测") \(WidgetDateFormatter.reset(guide.targetAt))。虚线为当前周期从 0% 至 100% 的线性额度参考；点击定位。")
+            .accessibilityLabel("\(guide.source == .official ? "官方重置" : "提前预测")，\(WidgetDateFormatter.reset(guide.targetAt))")
+            .accessibilityHint("定位到该重置时间")
+        }
+    }
+
+    private func revealGuide(_ guide: QuotaPacingGuide) {
+        followsPresent = false
+        pinnedReset = nil
+        selectedID = nil
+        selectedEventID = nil
+        referenceDate = min(timelineEnd, guide.targetAt.addingTimeInterval(range.duration * 0.06))
     }
 
     private var inspection: some View {
@@ -320,6 +437,12 @@ struct HistoryPanelView: View {
 
     private func rememberWindows() {
         var unique: [String: HistoryWindowOption] = [:]
+        for (source, windows) in history.liveWindows {
+            for window in windows {
+                unique[source.rawValue + ":" + window.id] = HistoryWindowOption(provider: source, id: window.id,
+                                                                              name: window.name, duration: window.durationSeconds)
+            }
+        }
         for record in history.records {
             let option = HistoryWindowOption(provider: record.provider, id: record.windowID,
                                              name: record.windowName, duration: record.durationSeconds)
@@ -363,7 +486,9 @@ struct HistoryPanelView: View {
     }
 
     private func refreshVisibleRange() {
-        history.refresh(range: range, aggregationSeconds: scale.aggregationSeconds)
+        guard range.start < latestDate else { return }
+        history.refresh(range: DateInterval(start: range.start, end: min(range.end, latestDate)),
+                        aggregationSeconds: scale.aggregationSeconds)
     }
 
     private func inspect(at location: CGPoint, proxy: ChartProxy, geometry: GeometryProxy, plot: HistoryPlot) {

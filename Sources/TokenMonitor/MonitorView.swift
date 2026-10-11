@@ -183,11 +183,11 @@ private struct ProviderCard: View {
             if let login {
                 IconAction(symbol: "person.crop.circle", label: "登录 Claude Code", action: login)
             }
-            if let openHistory {
-                IconAction(symbol: "arrow.up.left.and.arrow.down.right", label: "展开用量与重置历史", action: openHistory)
-            }
             if let refresh {
                 IconAction(symbol: "arrow.clockwise", label: "立即刷新额度", isLoading: state.isLoading, action: refresh)
+            }
+            if let openHistory {
+                IconAction(symbol: "arrow.up.left.and.arrow.down.right", label: "展开用量与重置历史", action: openHistory)
             }
             if let toggleEdge { IconAction(symbol: "sidebar.right", label: "收起到屏幕边缘", action: toggleEdge) }
             if let close { IconAction(symbol: "xmark", label: "隐藏悬浮窗", action: close) }

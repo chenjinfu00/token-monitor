@@ -15,6 +15,11 @@ final class UsageHistoryStore: ObservableObject {
     @Published private(set) var firstRecordedAt: Date?
     @Published private(set) var revision = 0
     @Published private(set) var recordingEnabled: Bool
+    @Published private(set) var liveWindows: [HistoryProvider: [QuotaWindow]] = [:]
+    @Published private(set) var liveUpdatedAt: [HistoryProvider: Date] = [:]
+    @Published private(set) var websiteReference: WebsiteResetReference?
+    @Published private(set) var liveNow = Date()
+    private var liveResetNews: ResetNewsState?
 
     private let directory: URL
     private var demoRecords: [UsageHistoryRecord]?
@@ -56,7 +61,23 @@ final class UsageHistoryStore: ObservableObject {
         RunLoop.main.add(timer, forMode: .common)
     }
 
+    func updateLive(provider: HistoryProvider, state: ProviderState, at now: Date = Date()) {
+        guard let capturedAt = state.updatedAt, capturedAt.timeIntervalSince1970.isFinite,
+              now.timeIntervalSince(capturedAt) <= 300, capturedAt.timeIntervalSince(now) <= 30,
+              liveUpdatedAt[provider].map({ capturedAt >= $0 }) ?? true else { return }
+        if liveWindows[provider] != state.windows { liveWindows[provider] = state.windows }
+        liveUpdatedAt[provider] = capturedAt
+        liveNow = now
+    }
+
+    func updateResetNews(_ state: ResetNewsState, at now: Date = Date()) {
+        liveResetNews = state
+        let reference = state.canShowReference(at: now) ? state.reference : nil
+        if websiteReference != reference { websiteReference = reference }
+    }
+
     func observe(provider: HistoryProvider, state: ProviderState, at now: Date) {
+        updateLive(provider: provider, state: state, at: now)
         guard recordingEnabled, demoRecords == nil, let capturedAt = state.updatedAt, let recorder else { return }
         let observations = state.windows.compactMap { window -> HistoryObservation? in
             guard let used = window.usedPercent else { return nil }
@@ -85,6 +106,8 @@ final class UsageHistoryStore: ObservableObject {
     }
 
     private func advance(at now: Date) {
+        if now.timeIntervalSince(liveNow) >= 60 { liveNow = now }
+        if let news = liveResetNews { updateResetNews(news, at: now) }
         guard let recorder else { return }
         let pending = recorder.pendingRecords.map(\.id)
         do {

@@ -1,6 +1,6 @@
 import Foundation
 
-struct WebsiteResetReference {
+struct WebsiteResetReference: Equatable {
     enum TargetKind: String { case center, deadline }
     let startAt: Date
     let referenceAt: Date

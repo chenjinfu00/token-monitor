@@ -50,6 +50,9 @@ final class MonitorStore: ObservableObject {
                 QuotaWindow(id: "week", name: "每周额度", usedPercent: 23, resetsAt: now.addingTimeInterval(396000), durationSeconds: 604800)
             ], updatedAt: now)
             resetNews = ResetNewsState(headline: "演示：公共重置信息", detail: "公共消息与账户额度分别展示", sourceURL: URL(string: "https://codex-resets.com/zh-CN"), updatedAt: now, message: nil)
+            history.updateLive(provider: .codex, state: codex, at: now)
+            history.updateLive(provider: .claude, state: claude, at: now)
+            history.updateResetNews(resetNews, at: now)
             return
         }
         readClaude()
@@ -114,6 +117,7 @@ final class MonitorStore: ObservableObject {
                 resetNews.message = "公共重置信息暂不可用 · 稍后自动重试"
                 if case ResetNewsError.throttled(let delay) = error { nextNewsFetch = Date().addingTimeInterval(max(300, delay)) }
             }
+            history.updateResetNews(resetNews)
         }
     }
 
