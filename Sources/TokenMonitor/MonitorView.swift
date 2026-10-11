@@ -15,11 +15,17 @@ struct MonitorView: View {
     @WidgetState(initialValue: CGFloat.zero) private var providerHeight: CGFloat
     @WidgetState(initialValue: CGFloat.zero) private var reportedHeight: CGFloat
 
+    @StateObject private var clock = WidgetClock()
+    private var clockInput: WidgetClock.Input {
+        WidgetClock.Input(mode: store.quotaClockEnabled ? .regular : .stopped,
+                          providers: [store.codex, store.claude])
+    }
+
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
+        Group {
             VStack(spacing: 8) {
-                providerArea(at: context.date)
-                ResetNewsRow(state: store.resetNews, history: store.history, now: context.date)
+                providerArea(at: clock.now)
+                ResetNewsRow(state: store.resetNews, history: store.history, now: clock.now)
             }
             .padding(WidgetLayout.panelInset)
             .frame(width: WidgetLayout.panelWidth(compact: store.compact))
@@ -37,6 +43,9 @@ struct MonitorView: View {
                 onHeightChange(next)
             }
         }
+        .onAppear { store.quotaLocalClock = clock; clock.update(clockInput) }
+        .onChange(of: clockInput) { _ in clock.update(clockInput) }
+        .onDisappear { clock.stop() }
     }
 
     private func providerArea(at now: Date) -> some View {

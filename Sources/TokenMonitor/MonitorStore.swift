@@ -8,6 +8,15 @@ final class MonitorStore: ObservableObject {
     @Published var codex = ProviderState(name: "Codex", message: "正在读取额度…")
     @Published var claude = ProviderState(name: "Claude · 实时", message: "正在通过官方 Claude Code 查询额度")
     @Published var compact = UserDefaults.standard.bool(forKey: "compact")
+    // Pause immediately, even if an offscreen hosting view defers its onChange callback.
+    weak var quotaLocalClock: WidgetClock?
+    weak var edgeLocalClock: WidgetClock?
+    @Published var quotaClockEnabled = false {
+        didSet { if !quotaClockEnabled { quotaLocalClock?.stop() } }
+    }
+    @Published var edgeClockEnabled = false {
+        didSet { if !edgeClockEnabled { edgeLocalClock?.stop() } }
+    }
     @Published var isConnectingClaude = false
     @Published var claudeConnected = false
     @Published var claudeNeedsLogin = false

@@ -2,13 +2,13 @@
 
 macOS 屏幕常驻小窗，显示 **Codex 与 Claude Code 的编程订阅剩余额度和重置时间**。品牌图标使用原版结形和放射形的透明矢量，没有图标底框。原生毛玻璃背景，可拖动、隐藏，或收起为屏幕边缘的 48 像素缩略窗。
 
-[下载 DMG](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.8.3/Token-Monitor-0.8.3-macos-universal.dmg) · [安装与登录](#下载与安装) · [MIT 许可证](LICENSE)
+[下载 DMG](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.8.4/Token-Monitor-0.8.4-macos-universal.dmg) · [安装与登录](#下载与安装) · [MIT 许可证](LICENSE)
 
 显示的是服务返回的额度百分比，不是精确 token 数，也不覆盖普通 ChatGPT 网页聊天的所有用量。需要 macOS 13 或更新版本。
 
 ## 下载与安装
 
-1. 下载 [DMG 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.8.3/Token-Monitor-0.8.3-macos-universal.dmg) 或 [ZIP 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.8.3/Token-Monitor-0.8.3-macos-universal.zip)。两者同时支持 Apple Silicon 与 Intel。
+1. 下载 [DMG 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.8.4/Token-Monitor-0.8.4-macos-universal.dmg) 或 [ZIP 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.8.4/Token-Monitor-0.8.4-macos-universal.zip)。两者同时支持 Apple Silicon 与 Intel。
 2. ZIP 解压后，将 **Token Monitor.app** 拖到 Finder 的“应用程序”。如果下载的是 DMG，打开后将应用拖到“应用程序”。
 3. 从“应用程序”双击 **Token Monitor**。应用会显示悬浮窗和菜单栏双行额度图标，不显示 Dock 图标。悬停在图标上可查看监控说明。
 
@@ -134,12 +134,12 @@ zsh build.sh
 
 构建输出为 `dist/Token Monitor.app`，默认构建当前电脑的架构。构建 Intel + Apple Silicon 通用应用使用 `zsh build.sh --universal`；生成可下载的 ZIP、DMG 和校验文件使用 `zsh tools/package-release.sh`。下载发行包不需要 Swift 工具链。测试入口优先使用已有的 Anaconda Python，否则使用 `PATH` 中的 `python3`，不会安装依赖。测试只使用固定样例和临时目录，不访问账户、不发起模型请求，也不修改真实 Claude 设置。
 
-当前安装包保存在 [`downloads/v0.8.3/`](downloads/v0.8.3/)，同目录提供 `SHA256SUMS.txt`。另提供 GitHub Actions 发行工作流：推送版本标签（如 `v0.8.3`）后测试、构建并上传到 Releases。主分支和 Pull Request 的独立检查只测试及构建，不发布安装包。当前没有自动更新，请从仓库下载新版本后替换应用。
+当前安装包保存在 [`downloads/v0.8.4/`](downloads/v0.8.4/)，同目录提供 `SHA256SUMS.txt`。另提供 GitHub Actions 发行工作流：推送版本标签（如 `v0.8.4`）后测试、构建并上传到 Releases。主分支和 Pull Request 的独立检查只测试及构建，不发布安装包。当前没有自动更新，请从仓库下载新版本后替换应用。
 
 校验单个下载文件时，在终端进入下载目录并运行：
 
 ```sh
-shasum -a 256 Token-Monitor-0.8.3-macos-universal.dmg
+shasum -a 256 Token-Monitor-0.8.4-macos-universal.dmg
 ```
 
 将输出与同目录 `SHA256SUMS.txt` 的 DMG 那一行比较；ZIP 同理，只需检查自己下载的文件。安装包目录的 `BUILD_INFO.md` 记录源码提交、构建版本与架构。

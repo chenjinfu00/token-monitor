@@ -14,10 +14,16 @@ struct EdgeHandleView: View {
     var onSizeChange: (CGSize) -> Void = { _ in }
     @EdgeWidgetState(initialValue: CGSize.zero) private var reportedSize: CGSize
 
+    @StateObject private var clock = WidgetClock()
+    private var clockInput: WidgetClock.Input {
+        WidgetClock.Input(mode: store.edgeClockEnabled ? .compact : .stopped,
+                          providers: [store.codex, store.claude])
+    }
+
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            let codex = EdgeQuotaSummary(provider: store.codex, at: context.date)
-            let claude = EdgeQuotaSummary(provider: store.claude, at: context.date)
+        Group {
+            let codex = EdgeQuotaSummary(provider: store.codex, at: clock.now)
+            let claude = EdgeQuotaSummary(provider: store.claude, at: clock.now)
             let summary = tooltip(name: "Codex", summary: codex)
                 + "\n" + tooltip(name: "Claude", summary: claude)
             Group {
@@ -53,6 +59,9 @@ struct EdgeHandleView: View {
                 onSizeChange(next)
             }
         }
+        .onAppear { store.edgeLocalClock = clock; clock.update(clockInput) }
+        .onChange(of: clockInput) { _ in clock.update(clockInput) }
+        .onDisappear { clock.stop() }
     }
 
     private func providerSummary(codex: EdgeQuotaSummary, claude: EdgeQuotaSummary, tooltip: String) -> some View {

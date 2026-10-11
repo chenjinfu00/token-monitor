@@ -138,7 +138,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if UserDefaults.standard.object(forKey: "collapsedDocked") != nil {
             handleIsDocked = UserDefaults.standard.bool(forKey: "collapsedDocked")
         }
-        if isCollapsed { showHandle() } else { panel.orderFrontRegardless() }
+        if isCollapsed { showHandle() }
+        else {
+            store.quotaClockEnabled = true
+            panel.orderFrontRegardless()
+        }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button { MenuBarIcon.configure(button) }
@@ -400,6 +404,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let initialOutgoingAlpha = outgoing.alphaValue
         incoming.alphaValue = shouldAnimate ? initialIncomingAlpha : 1
         incoming.ignoresMouseEvents = false
+        store.quotaClockEnabled = incoming === panel && !isDetailed
+        store.edgeClockEnabled = incoming === handle
         incoming.orderFrontRegardless()
         let complete: () -> Void = {
             outgoing.orderOut(nil)
@@ -446,6 +452,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     private func hidePanels() {
         cancelPanelTransition()
+        store.quotaClockEnabled = false
+        store.edgeClockEnabled = false
         panel.orderOut(nil)
         handle.orderOut(nil)
         panel.alphaValue = 1
@@ -533,6 +541,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             panel.setFrameAutosaveName("")
         } else { detailedSize = anchor.size }
         isDetailed = value
+        store.quotaClockEnabled = !value && panel.isVisible && !isCollapsed
         (panel as? FloatingQuotaPanel)?.allowsKeyboardFocus = value
         panel.contentMinSize = value ? NSSize(width: 640, height: 440) : .zero
         if value { panel.styleMask.insert(.resizable) }
