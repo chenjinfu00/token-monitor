@@ -150,9 +150,12 @@ struct EdgeQuotaSummary {
         if !expired, let reset = selected?.resetsAt {
             let hours = reset.timeIntervalSince(now) / 3600
             if hours.isFinite, hours > 0 {
-                // Keep the smallest positive display unit until the real
-                // deadline; an ended window remains unknown until updated.
-                hoursText = String(format: "%.1fh", locale: Locale(identifier: "en_US_POSIX"), max(0.1, hours))
+                let seconds = reset.timeIntervalSince(now)
+                let shortTime: String?
+                if seconds < 60 { shortTime = "\(max(1, Int(seconds)))s" }
+                else if seconds < 3600 { shortTime = "\(Int(seconds / 60))m" }
+                else { shortTime = nil }
+                hoursText = shortTime ?? String(format: "%.1fh", locale: Locale(identifier: "en_US_POSIX"), hours)
                 var days = floor(hours / 24)
                 let rawRemainder = hours.truncatingRemainder(dividingBy: 24)
                 let wholeHours = rawRemainder > 10
@@ -161,7 +164,7 @@ struct EdgeQuotaSummary {
                 // an extra full day among the remaining hours.
                 if days >= 1, remainder >= 24 { days += 1; remainder = 0 }
                 daysText = days >= 1 ? String(format: "%.0fd", locale: Locale(identifier: "en_US_POSIX"), days) : nil
-                hourComponentText = String(format: wholeHours ? "%.0fh" : "%.1fh", locale: Locale(identifier: "en_US_POSIX"), days >= 1 ? remainder : max(0.1, remainder))
+                hourComponentText = shortTime ?? String(format: wholeHours ? "%.0fh" : "%.1fh", locale: Locale(identifier: "en_US_POSIX"), days >= 1 ? remainder : max(0.1, remainder))
             } else {
                 hoursText = "—"
                 daysText = nil

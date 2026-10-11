@@ -172,14 +172,32 @@ final class QuotaParserTests {
             resetsAt: now.addingTimeInterval(30), durationSeconds: 18000)
         let current = EdgeQuotaSummary(provider: ProviderState(name: "Claude", windows: [near, past]), at: now)
         XCTAssertEqual(current.percentText, "0%")
-        XCTAssertEqual(current.hoursText, "0.1h")
+        XCTAssertEqual(current.hoursText, "30s")
         XCTAssertNil(current.daysText)
-        XCTAssertEqual(current.hourComponentText, "0.1h")
+        XCTAssertEqual(current.hourComponentText, "30s")
         let noReset = QuotaWindow(id: "five_hour", name: "5小时额度", usedPercent: 23, resetsAt: nil)
         let partial = EdgeQuotaSummary(provider: ProviderState(name: "Claude", windows: [noReset]), at: now)
         XCTAssertEqual(partial.percentText, "77%")
         XCTAssertEqual(partial.hoursText, "—")
         XCTAssertEqual(partial.pace, .unknown)
+    }
+
+    func testCollapsedCountdownSwitchesAtMinuteAndHourBoundaries() {
+        let now = Date(timeIntervalSince1970: 1_900_000_000)
+        let cases: [(TimeInterval, String)] = [(0.2, "1s"), (2, "2s"), (30, "30s"),
+            (59, "59s"), (59.9, "59s"), (60, "1m"), (600, "10m"), (1800, "30m"),
+            (3599, "59m"), (3600, "1.0h")]
+        for provider in ["Codex", "Claude"] {
+            for (seconds, expected) in cases {
+                let window = QuotaWindow(id: provider == "Codex" ? "codex.primary" : "five_hour",
+                    name: "5小时额度", usedPercent: 40, resetsAt: now.addingTimeInterval(seconds), durationSeconds: 18000)
+                let summary = EdgeQuotaSummary(provider: ProviderState(name: provider, windows: [window]), at: now)
+                XCTAssertEqual(summary.hoursText, expected)
+                XCTAssertEqual(summary.hourComponentText, expected)
+                XCTAssertNil(summary.daysText)
+                XCTAssertEqual(summary.percentText, "60%")
+            }
+        }
     }
 
     func testVerticalSummarySplitsDaysAndRemainingHours() {
@@ -522,6 +540,7 @@ struct QuotaChecks {
         tests.testExactResetDatesFollowTimeZoneAndDaylightSaving()
         tests.testCollapsedSummaryKeepsQuotaAndResetFromSameOverallWindow()
         tests.testCollapsedSummaryMissingExpiredAndNearResetAreTruthful()
+        tests.testCollapsedCountdownSwitchesAtMinuteAndHourBoundaries()
         tests.testVerticalSummarySplitsDaysAndRemainingHours()
         tests.testObservedEarlyRecoveryAnchorsUnchangedDeadline()
         tests.testAvailableResetCountUnknownAndZeroAreDistinct()
@@ -540,7 +559,7 @@ struct QuotaChecks {
         tests.testRetryAfterHonoursBothSecondsAndHTTPDate()
         tests.testPublicCacheLifetimeUsesClientMaxAgeAndSubtractsAge()
         try tests.testPublicSnapshotRegressionAndRevalidationPreserveGeneratedTime()
-        print("29 quota, pacing, reset-date, collapsed-summary, early recovery and public-reset checks passed")
+        print("30 quota, pacing, reset-date, collapsed-summary, early recovery and public-reset checks passed")
         ClaudeUsageChecks.run()
         print("12 Claude live-usage and freshness checks passed")
     }
