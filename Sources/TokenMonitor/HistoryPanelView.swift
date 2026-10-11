@@ -41,7 +41,7 @@ struct HistoryPanelView: View {
     }
     private var presentEnd: Date {
         guard let target = pacingGuides.first(where: { $0.source == .official })?.targetAt else { return latestDate }
-        return latestDate.addingTimeInterval(min(target.timeIntervalSince(latestDate), range.duration * 0.35))
+        return latestDate.addingTimeInterval(min(target.timeIntervalSince(latestDate) + range.duration * 0.06, range.duration * 0.35))
     }
     private var windowOptions: [HistoryWindowOption] {
         knownWindows.filter { $0.provider == provider }.sorted { left, right in
