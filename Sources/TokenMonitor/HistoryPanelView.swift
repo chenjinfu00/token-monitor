@@ -946,7 +946,8 @@ private final class HistoryChartScrollView<Content: View>: NSScrollView {
         guard !isConfiguring, pixelsPerSecond > 0 else { return }
         positionChart()
         let end = min(latest, start.addingTimeInterval((contentView.bounds.minX + contentView.bounds.width) / pixelsPerSecond))
-        guard abs(end.timeIntervalSince(visibleEnd)) > 0.05 else { return }
+        // Native clipping rounds programmatic offsets; a sub-point change is not a user pan.
+        guard abs(end.timeIntervalSince(visibleEnd)) > max(0.05, 1 / Double(pixelsPerSecond)) else { return }
         visibleEnd = end
         onChange(end)
     }
