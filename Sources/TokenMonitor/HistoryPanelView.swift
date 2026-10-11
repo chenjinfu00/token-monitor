@@ -137,6 +137,7 @@ struct HistoryPanelView: View {
             HStack(spacing: 6) {
                 ProviderBrandIcon(brand: brand).frame(width: 21, height: 21)
                 Text(title).font(.system(size: 14, weight: provider == value ? .semibold : .regular))
+                    .lineLimit(1).fixedSize(horizontal: true, vertical: false)
             }
             .foregroundStyle(provider == value ? Color.primary : Color.secondary)
             .opacity(provider == value ? 1 : 0.65)
