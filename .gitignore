@@ -24,3 +24,7 @@ statusline-diagnostics.json
 install-state.json
 settings.backup.*.json
 *.log
+
+# Local quota history archives and checkpoints.
+History/
+usage-????-??.jsonl

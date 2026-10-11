@@ -4,6 +4,7 @@ import Combine
 
 @MainActor
 final class MonitorStore: ObservableObject {
+    let history: UsageHistoryStore
     @Published var codex = ProviderState(name: "Codex", message: "正在读取额度…")
     @Published var claude = ProviderState(name: "Claude · 实时", message: "正在通过官方 Claude Code 查询额度")
     @Published var compact = UserDefaults.standard.bool(forKey: "compact")
@@ -37,6 +38,7 @@ final class MonitorStore: ObservableObject {
 
     init(demo: Bool = false) {
         self.demo = demo
+        self.history = UsageHistoryStore(demo: demo)
         if demo {
             let now = Date()
             codex = ProviderState(name: "Codex · 演示", windows: [
@@ -89,6 +91,7 @@ final class MonitorStore: ObservableObject {
                 self.codex.windows = tracked.windows
                 self.codex.resetCreditCount = snapshot.resetCreditCount
                 self.codex.updatedAt = now
+                self.history.observe(provider: .codex, state: self.codex, at: now)
                 if tracked.recovered { self.lastRecoveryAt = now }
                 if snapshot.windows.isEmpty { self.codex.message = "账户未返回订阅额度 · 请确认使用 ChatGPT 登录" }
                 else if let recovered = self.lastRecoveryAt, now.timeIntervalSince(recovered) < 86400 {
@@ -175,6 +178,7 @@ final class MonitorStore: ObservableObject {
                   (snapshot["schemaVersion"] as? Int) == 1,
                   QuotaParser.number(snapshot["capturedAt"]) != nil else { throw ProbeError.invalidResponse }
             claude = QuotaParser.claude(snapshot)
+            history.observe(provider: .claude, state: claude, at: Date())
             if claude.windows.isEmpty { claude.message = statusLineDiagnosticMessage() }
             lastClaudeData = data
         } catch { claude.message = "本地额度快照暂不可读 · 等待下次回复" }
@@ -214,6 +218,7 @@ final class MonitorStore: ObservableObject {
             switch outcome {
             case .success(let snapshot):
                 claude = snapshot
+                history.observe(provider: .claude, state: claude, at: Date())
                 claudeNeedsLogin = false
                 claudeIsThrottled = false
                 claudeRetryDelay = 300
@@ -284,6 +289,7 @@ final class MonitorStore: ObservableObject {
     }
 
     func stop() {
+        history.stop()
         codexTimer?.invalidate()
         claudeTimer?.invalidate()
         newsTimer?.invalidate()

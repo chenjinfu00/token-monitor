@@ -10,6 +10,7 @@ struct MonitorView: View {
     var onClose: () -> Void
     var onToggleCompact: () -> Void
     var onToggleEdge: () -> Void = {}
+    var onOpenHistory: () -> Void = {}
     var onHeightChange: (CGFloat) -> Void = { _ in }
     @WidgetState(initialValue: CGFloat.zero) private var providerHeight: CGFloat
     @WidgetState(initialValue: CGFloat.zero) private var reportedHeight: CGFloat
@@ -18,7 +19,7 @@ struct MonitorView: View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             VStack(spacing: 8) {
                 providerArea(at: context.date)
-                ResetNewsRow(state: store.resetNews, now: context.date)
+                ResetNewsRow(state: store.resetNews, now: context.date, openHistory: onOpenHistory)
             }
             .padding(WidgetLayout.panelInset)
             .frame(width: WidgetLayout.panelWidth(compact: store.compact))
@@ -350,6 +351,7 @@ private struct QuotaBar: View {
 private struct ResetNewsRow: View {
     let state: ResetNewsState
     let now: Date
+    var openHistory: () -> Void = {}
 
     private var warning: String {
         [state.message, state.freshnessWarning(at: now)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
@@ -377,6 +379,7 @@ private struct ResetNewsRow: View {
                     .frame(width: 16, height: 16).accessibilityLabel("正在更新网站消息")
             }
             Spacer(minLength: 3)
+            IconAction(symbol: "chart.xyaxis.line", label: "打开用量历史与记录设置", action: openHistory)
             InfoButton(symbol: warning.isEmpty ? "info.circle" : "exclamationmark.triangle",
                 label: warning.isEmpty ? "查看公共重置消息与更新时间" : "查看公共重置消息与警告",
                 color: warning.isEmpty ? .secondary : .orange) { newsDetails }

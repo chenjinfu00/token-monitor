@@ -18,4 +18,8 @@ xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks
 xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
   Sources/TokenMonitor/SingleInstanceLock.swift Tests/SingleInstanceChecks.swift -o .build/SingleInstanceChecks
 .build/SingleInstanceChecks
+xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
+  Sources/TokenMonitor/HistoryModels.swift Sources/TokenMonitor/UsageHistoryRecorder.swift \
+  Tests/HistoryChecks.swift -o .build/HistoryChecks
+.build/HistoryChecks
 "$token_monitor_python" -m unittest discover -s tools -p 'test_*.py'

@@ -31,10 +31,9 @@ enum MenuBarIcon {
 
     static func configure(_ button: NSStatusBarButton) {
         button.image = image
-        button.imagePosition = .imageLeading
+        button.imagePosition = .imageOnly
         button.imageScaling = .scaleNone
-        button.title = " 额度"
-        button.font = .systemFont(ofSize: 12, weight: .medium)
+        button.title = ""
         button.toolTip = "Token Monitor · Codex 与 Claude Code 订阅额度\n点击打开菜单，管理小窗口或立即同步"
         button.setAccessibilityLabel("Token Monitor，Codex 与 Claude Code 订阅额度")
         button.setAccessibilityHelp("点击打开菜单，管理额度小窗口或立即同步")

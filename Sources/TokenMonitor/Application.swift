@@ -65,6 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var panel: NSPanel!
     private var handle: NSPanel!
     private var store: MonitorStore!
+    private var historyWindow: NSWindow?
     private var expandedFrame = NSRect.zero
     private var naturalHeight: CGFloat = 176
     private var naturalHandleSize = EdgeHandleView.size
@@ -88,6 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             onClose: { [weak self] in self?.hidePanels() },
             onToggleCompact: { [weak self] in self?.toggleCompact() },
             onToggleEdge: { [weak self] in self?.toggleEdge() },
+            onOpenHistory: { [weak self] in self?.openHistory() },
             onHeightChange: { [weak self] height in
                 DispatchQueue.main.async { self?.resizeContent(to: height) }
             })
@@ -142,6 +144,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let edgeItem = menu.addItem(withTitle: "收起到屏幕边缘", action: #selector(toggleEdge), keyEquivalent: "")
         edgeItem.tag = 2
         menu.addItem(withTitle: "立即同步", action: #selector(refresh), keyEquivalent: "r")
+        menu.addItem(withTitle: "用量历史…", action: #selector(openHistory), keyEquivalent: "h")
         let sourceItem = menu.addItem(withTitle: "Claude 读取方式", action: nil, keyEquivalent: "")
         sourceItem.tag = 3
         let sourceMenu = NSMenu()
@@ -161,6 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         NotificationCenter.default.addObserver(self, selector: #selector(screensChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(instanceReopened(_:)),
             name: SingleInstanceLock.revealNotificationName, object: nil)
+        if CommandLine.arguments.contains("--history") { openHistory() }
     }
 
     private func configure(_ window: NSPanel) {
@@ -474,6 +478,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         panel.saveFrame(usingName: "TokenMonitorFloatingPanel")
     }
 
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window === historyWindow else { return }
+        window.saveFrame(usingName: "TokenMonitorHistoryPanel")
+        window.contentView = nil
+        historyWindow = nil
+        store.history.closePanel()
+    }
+
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.item(withTag: 1)?.title = panel.isVisible || handle.isVisible ? "隐藏小窗口" : "显示小窗口"
         menu.item(withTag: 2)?.title = isCollapsed ? "展开小窗口" : "收起到屏幕边缘"
@@ -492,6 +504,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func revealExisting() {
         if isCollapsed { showHandle() }
         else { setExpandedFrame(expandedFrame); show(panel, hiding: handle, animated: false) }
+    }
+
+    @objc private func openHistory() {
+        if historyWindow == nil {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 740, height: 550),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+            window.title = "用量历史"
+            window.delegate = self
+            window.titleVisibility = .hidden
+            window.titlebarAppearsTransparent = true
+            window.isReleasedWhenClosed = false
+            window.contentMinSize = NSSize(width: 640, height: 440)
+            window.level = .floating
+            window.setFrameAutosaveName("TokenMonitorHistoryPanel")
+            let glass = NSVisualEffectView(frame: window.contentView?.bounds ?? .zero)
+            glass.material = .underWindowBackground
+            glass.blendingMode = .behindWindow
+            glass.state = .active
+            let host = NSHostingView(rootView: HistoryPanelView(history: store.history))
+            host.translatesAutoresizingMaskIntoConstraints = false
+            glass.addSubview(host)
+            NSLayoutConstraint.activate([
+                host.leadingAnchor.constraint(equalTo: glass.leadingAnchor),
+                host.trailingAnchor.constraint(equalTo: glass.trailingAnchor),
+                host.topAnchor.constraint(equalTo: glass.topAnchor),
+                host.bottomAnchor.constraint(equalTo: glass.bottomAnchor)
+            ])
+            window.contentView = glass
+            if !window.setFrameUsingName("TokenMonitorHistoryPanel") { window.center() }
+            historyWindow = window
+        }
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        historyWindow?.makeKeyAndOrderFront(nil)
     }
 
     @objc private func refresh() { store.refreshNow(force: true) }
