@@ -6,7 +6,8 @@ import SwiftUI
 @MainActor
 final class FloatingQuotaPanel: NSPanel {
     var isTrackingCollapsedInteraction = false
-    override var canBecomeKey: Bool { false }
+    var allowsKeyboardFocus = false
+    override var canBecomeKey: Bool { allowsKeyboardFocus }
     override var canBecomeMain: Bool { false }
 }
 

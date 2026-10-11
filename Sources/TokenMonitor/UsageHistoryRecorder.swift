@@ -9,6 +9,8 @@ final class UsageHistoryRecorder {
     private var previous: [String: LastObservation] = [:]
     private var acceptedAt: [HistoryProvider: Date] = [:]
     private var segmentFloor: Date?
+    private var resetArchive: ResetHistoryArchive?
+    private(set) var resetRevision = 0
     private let fileManager = FileManager.default
 
     init(directory: URL, interval: HistorySamplingInterval = .fifteenMinutes) throws {
@@ -16,6 +18,30 @@ final class UsageHistoryRecorder {
         self.interval = interval
         try Self.ensureDirectory(directory)
         try restorePrevious()
+        resetArchive = try ResetHistoryArchive(directory: directory)
+        restoreResetBaselines()
+    }
+
+    static func readResetHistory(directory: URL) throws -> [HistoryResetRecord] {
+        try ResetHistoryArchive.read(directory: directory)
+    }
+
+    func readResetHistory() throws -> [HistoryResetRecord] { try Self.readResetHistory(directory: directory) }
+
+    static func forEachArchivedRecord(directory: URL, consume: (UsageHistoryRecord) -> Void) throws {
+        for file in try historyFiles(directory) { try streamRecords(file, consume: consume) }
+    }
+
+    private func restoreResetBaselines() {
+        for record in resetArchive?.latest ?? [] {
+            let key = Self.key(record.provider, record.windowID)
+            guard previous[key].map({ $0.observedAt < record.observedAt }) ?? true else { continue }
+            previous[key] = LastObservation(provider: record.provider, windowID: record.windowID,
+                windowName: record.windowName, observedAt: record.observedAt, usedPercent: record.usedPercent,
+                resetsAt: record.resetsAt, durationSeconds: record.durationSeconds)
+            acceptedAt[record.provider] = max(acceptedAt[record.provider] ?? .distantPast, record.observedAt)
+            firstRecordedAt = min(firstRecordedAt ?? record.previousObservedAt, record.previousObservedAt)
+        }
     }
 
     var pendingRecords: [UsageHistoryRecord] {
@@ -28,7 +54,6 @@ final class UsageHistoryRecorder {
               capturedAt.timeIntervalSince(now) <= 30,
               acceptedAt[provider].map({ capturedAt > $0 }) ?? true else { return }
         try flush(at: now)
-        acceptedAt[provider] = capturedAt
         var seenWindows: Set<String> = []
         for observation in observations.prefix(128) {
             guard seenWindows.insert(observation.windowID).inserted else { continue }
@@ -39,6 +64,7 @@ final class UsageHistoryRecorder {
             firstRecordedAt = min(firstRecordedAt ?? capturedAt, capturedAt)
             let duration = observation.durationSeconds.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
             let key = Self.key(provider, observation.windowID)
+            guard previous[key].map({ capturedAt > $0.observedAt }) ?? true else { continue }
             let last = LastObservation(provider: provider, windowID: observation.windowID,
                 windowName: observation.name, observedAt: capturedAt, usedPercent: used,
                 resetsAt: observation.resetsAt, durationSeconds: duration)
@@ -65,12 +91,19 @@ final class UsageHistoryRecorder {
                 bucket.windowName = observation.name
             }
             if let old = previous[key], capturedAt > old.observedAt {
-                bucket.resetEvents.append(contentsOf: Self.events(previous: old, current: last))
+                let events = Self.events(previous: old, current: last)
+                let resets = events.filter { $0.kind == .usageDrop }.map {
+                    HistoryResetRecord(provider: provider, windowID: observation.windowID,
+                        windowName: observation.name, event: $0, durationSeconds: duration)
+                }
+                resetRevision += try resetArchive?.append(resets) ?? 0
+                bucket.resetEvents.append(contentsOf: events)
             }
             bucket.sampleCount += 1
             pending[key] = bucket
             previous[key] = last
         }
+        acceptedAt[provider] = capturedAt
     }
 
     /// Disk writes occur once per completed interval. Force only for quit or explicit setting changes.
@@ -219,6 +252,7 @@ final class UsageHistoryRecorder {
 
     /// Remove only this recorder's named files. Other files beside the archive are left intact.
     func clear(at now: Date = Date()) throws {
+        resetArchive?.prepareClear()
         let files = try fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
         for file in files where Self.isOwnedFilename(file.lastPathComponent) { try fileManager.removeItem(at: file) }
         pending.removeAll()
@@ -226,6 +260,8 @@ final class UsageHistoryRecorder {
         acceptedAt.removeAll()
         segmentFloor = now
         firstRecordedAt = nil
+        try resetArchive?.finishClear()
+        resetRevision += 1
     }
 
     /// Remove completed intervals ending at/before the chosen date. A bucket crossing
@@ -235,6 +271,7 @@ final class UsageHistoryRecorder {
         try Self.rejectSymbolicLink(directory)
         let entries = try fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isSymbolicLinkKey])
         for entry in entries where Self.isOwnedFilename(entry.lastPathComponent) { try Self.rejectSymbolicLink(entry) }
+        try resetArchive?.prepareRemoval(before: cutoff)
         let cutoffMonth = Self.monthStart(cutoff)
         let encoder = Self.encoder()
         for file in try Self.historyFiles(directory) {
@@ -297,6 +334,9 @@ final class UsageHistoryRecorder {
             try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: checkpointURL.path)
         }
         segmentFloor = max(segmentFloor ?? now, now)
+        try resetArchive?.finishRemoval(before: cutoff)
+        restoreResetBaselines()
+        resetRevision += 1
     }
 
     private func persist(_ records: [UsageHistoryRecord]) throws {
@@ -492,7 +532,7 @@ final class UsageHistoryRecorder {
               let year = Int(components[0]), let month = Int(components[1]), (1...9999).contains(year), (1...12).contains(month) else { return nil }
         return utcCalendar.date(from: DateComponents(year: year, month: month, day: 1))
     }
-    private static func isOwnedFilename(_ name: String) -> Bool { name == "latest.json" || fileMonth(name) != nil }
+    private static func isOwnedFilename(_ name: String) -> Bool { name == "latest.json" || fileMonth(name) != nil || ResetHistoryArchive.isOwnedFilename(name) }
     private static func historyFiles(_ directory: URL) throws -> [URL] {
         guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
         return try FileManager.default.contentsOfDirectory(at: directory,

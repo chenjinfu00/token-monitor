@@ -8,6 +8,8 @@ private typealias HistoryViewState<Value> = SwiftUI.State<Value>
 @MainActor
 struct HistoryPanelView: View {
     @ObservedObject var history: UsageHistoryStore
+    var onToggleExpanded: () -> Void = {}
+    var onClose: () -> Void = {}
     @HistoryViewState(initialValue: HistoryTimeScale.day) private var scale: HistoryTimeScale
     @HistoryViewState(initialValue: Date()) private var referenceDate: Date
     @HistoryViewState(initialValue: Date()) private var latestDate: Date
@@ -23,9 +25,7 @@ struct HistoryPanelView: View {
     @HistoryViewState(initialValue: Optional<UUID>.none) private var selectedEventID: UUID?
     @HistoryViewState(initialValue: false) private var showingEventDetails: Bool
     @HistoryViewState(initialValue: false) private var showingEventList: Bool
-    @HistoryViewState(initialValue: false) private var showingSettings: Bool
-    @HistoryViewState(initialValue: false) private var confirmingDeletion: Bool
-    @HistoryViewState(initialValue: Calendar.autoupdatingCurrent.startOfDay(for: Date())) private var cleanupDate: Date
+    @HistoryViewState(initialValue: Optional<HistoryResetRecord>.none) private var pinnedReset: HistoryResetRecord?
     @AppStorage("history.showResetMarkers") private var showsResetMarkers = true
 
     private var range: DateInterval { scale.range(containing: referenceDate) }
@@ -44,74 +44,47 @@ struct HistoryPanelView: View {
     }
     private var visibleSelection: UsageHistoryRecord? { selected ?? cachedPlot.points.last?.record }
     private var selectedEvent: HistoryPlot.Event? {
+        if let pinnedReset { return resetEvent(pinnedReset) }
         guard let selectedEventID else { return nil }
-        return cachedPlot.events.first { $0.id == selectedEventID }
+        return visibleEvents.first { $0.id == selectedEventID }
     }
-    private var earliestDate: Date { history.firstRecordedAt ?? latestDate }
+    private var visibleEvents: [HistoryPlot.Event] {
+        var grouped: [Date: [HistoryResetEvent]] = [:]
+        var seen = Set<UUID>()
+        for event in cachedPlot.events.flatMap(\.events) where seen.insert(event.id).inserted {
+            grouped[event.observedAt, default: []].append(event)
+        }
+        for record in history.resetHistory where record.provider == provider && record.windowID == effectiveWindowID
+            && record.observedAt >= range.start && record.observedAt <= range.end {
+            let event = resetEvent(record).primary
+            if seen.insert(event.id).inserted { grouped[event.observedAt, default: []].append(event) }
+        }
+        return grouped.values.map { HistoryPlot.Event(events: $0) }.sorted { $0.observedAt < $1.observedAt }
+    }
+    private var earliestDate: Date { min(history.firstRecordedAt ?? latestDate, history.resetHistory.map(\.observedAt).min() ?? latestDate) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            heading
             filters
             dateNavigation
             chartArea
             inspection
-            footer
         }
         .padding(.horizontal, 24)
         .padding(.top, 18)
         .padding(.bottom, 18)
         .frame(minWidth: 640, minHeight: 440)
-        .onAppear { rememberWindows(); rebuildSeries(); refreshVisibleRange() }
+        .onAppear { rememberWindows(); rebuildSeries(); refreshVisibleRange(); history.refreshResetHistory() }
         .onDisappear { renderTask?.cancel() }
-        .onChange(of: range) { _ in selectedID = nil; selectedEventID = nil; rebuildSeries(); refreshVisibleRange() }
-        .onChange(of: provider) { _ in selectedID = nil; selectedEventID = nil; rebuildSeries() }
-        .onChange(of: windowID) { _ in selectedID = nil; selectedEventID = nil; rebuildSeries() }
+        .onChange(of: range) { _ in prepareSelectionForViewChange(); rebuildSeries(); refreshVisibleRange() }
+        .onChange(of: provider) { _ in prepareSelectionForViewChange(); rebuildSeries() }
+        .onChange(of: windowID) { _ in prepareSelectionForViewChange(); rebuildSeries() }
         .onChange(of: history.records) { _ in rememberWindows(); rebuildSeries() }
+        .onChange(of: history.resetHistory) { _ in rememberWindows(); rebuildSeries() }
         .onChange(of: history.revision) { _ in
             latestDate = Date()
             if followsPresent { referenceDate = latestDate }
             refreshVisibleRange()
-        }
-        .alert("清理 \(cleanupDateText) 之前的记录？", isPresented: $confirmingDeletion) {
-            Button("取消", role: .cancel) { }
-            Button("清理记录", role: .destructive) {
-                selectedID = nil
-                selectedEventID = nil
-                history.removeHistory(before: Calendar.autoupdatingCurrent.startOfDay(for: cleanupDate))
-            }
-        } message: {
-            Text("只删除本地时间 \(cleanupDateText) 00:00 之前的完整记录区间。该日期及之后的记录、跨过此时间的区间均保留。删除后无法恢复。")
-        }
-    }
-
-    private var heading: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("额度历史").font(.system(size: 22, weight: .semibold))
-                Text("已使用比例 · 每个记录区间保留峰值")
-                    .font(.system(size: 13)).foregroundStyle(.secondary)
-            }
-            Spacer()
-            if history.isLoading {
-                ProgressView().controlSize(.small).accessibilityLabel("正在读取历史记录")
-            }
-            Button { showingEventList = true } label: {
-                Label("重置记录 \(cachedPlot.events.count)", systemImage: "list.bullet")
-                    .font(.system(size: 12, weight: .medium)).monospacedDigit()
-            }
-            .buttonStyle(.plain).foregroundStyle(.secondary)
-            .disabled(cachedPlot.events.isEmpty)
-            .help("查看当前额度窗口、当前时间范围内的每次重置观测")
-            .accessibilityLabel("查看全部 \(cachedPlot.events.count) 次重置观测")
-            .popover(isPresented: $showingEventList, arrowEdge: .bottom) { eventList }
-            Button { showingSettings = true } label: {
-                Image(systemName: "gearshape").font(.system(size: 17, weight: .medium))
-                    .frame(width: 28, height: 28)
-            }
-            .buttonStyle(.plain).foregroundStyle(.secondary)
-            .help("历史记录设置").accessibilityLabel("历史记录设置")
-            .popover(isPresented: $showingSettings, arrowEdge: .bottom) { settings }
         }
     }
 
@@ -130,7 +103,32 @@ struct HistoryPanelView: View {
             .frame(minWidth: 90, maxWidth: 170, alignment: .leading)
             .disabled(windowOptions.isEmpty)
             .help("按独立额度窗口查看；不同窗口的百分比不合并")
-            Spacer(minLength: 0)
+            Spacer(minLength: 12)
+                .frame(minHeight: 26)
+                .overlay { NativeWindowDragRegion(onDoubleClick: onToggleExpanded) }
+            if history.isLoading {
+                ProgressView().controlSize(.small).accessibilityLabel("正在读取历史记录")
+            }
+            if let error = history.errorMessage {
+                Image(systemName: "exclamationmark.circle").foregroundStyle(Color.paceYellow)
+                    .frame(width: 20, height: 26).help(error).accessibilityLabel(error)
+            }
+            Button { history.refreshResetHistory(); showingEventList = true } label: {
+                Image(systemName: "clock.arrow.circlepath").font(.system(size: 16, weight: .medium)).frame(width: 24, height: 26)
+            }
+            .buttonStyle(.plain).foregroundStyle(.secondary)
+            .help("重置历史").accessibilityLabel("重置历史")
+            .popover(isPresented: $showingEventList, arrowEdge: .bottom) { eventList }
+            Button(action: onToggleExpanded) {
+                Image(systemName: "arrow.down.right.and.arrow.up.left").font(.system(size: 14, weight: .medium)).frame(width: 24, height: 26)
+            }
+            .buttonStyle(.plain).foregroundStyle(.secondary)
+            .help("收起到额度页面").accessibilityLabel("收起到额度页面")
+            Button(action: onClose) {
+                Image(systemName: "xmark").font(.system(size: 14, weight: .medium)).frame(width: 24, height: 26)
+            }
+            .buttonStyle(.plain).foregroundStyle(.secondary)
+            .help("隐藏窗口").accessibilityLabel("隐藏窗口")
         }
     }
 
@@ -165,17 +163,12 @@ struct HistoryPanelView: View {
     }
 
     @ViewBuilder private var chartArea: some View {
-        if history.firstRecordedAt == nil && history.records.isEmpty {
+        if history.firstRecordedAt == nil && history.records.isEmpty && history.resetHistory.isEmpty {
             VStack(spacing: 9) {
                 Image(systemName: history.recordingEnabled ? "chart.xyaxis.line" : "pause.circle")
                     .font(.system(size: 30, weight: .light)).foregroundStyle(.secondary)
-                Text(history.recordingEnabled ? "这段时间还没有记录" : "记录已暂停")
+                Text(history.recordingEnabled ? "待记录" : "已暂停")
                     .font(.system(size: 15, weight: .medium))
-                Text(history.firstRecordedAt == nil
-                    ? "从现在开始记录，首个区间会保留实时采样到的峰值。"
-                    : "可切换日期或额度窗口。没有采样的时间保持空白。")
-                    .font(.system(size: 13)).foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .frame(minHeight: 110)
@@ -200,6 +193,7 @@ struct HistoryPanelView: View {
 
     private var historyChart: some View {
         let values = cachedPlot
+        let events = visibleEvents
         return Chart {
             ForEach(values.points) { point in
                 LineMark(x: .value("记录区间", point.date), y: .value("已使用峰值", point.record.peakUsedPercent),
@@ -213,7 +207,7 @@ struct HistoryPanelView: View {
                 }
             }
             if showsResetMarkers {
-                ForEach(values.events) { event in
+                ForEach(events) { event in
                     if scale == .fiveHours || scale == .day {
                         RuleMark(x: .value("重置观测", event.observedAt))
                             .lineStyle(StrokeStyle(lineWidth: 0.8, dash: [3, 4]))
@@ -238,6 +232,8 @@ struct HistoryPanelView: View {
             }
         }
         .chartYScale(domain: 0...100)
+        .chartYAxisLabel("使用额度", position: .leading)
+        .chartXAxisLabel("时间", position: .bottom)
         .chartXScale(domain: range.start...range.end)
         .chartLegend(.hidden)
         .chartYAxis {
@@ -281,27 +277,7 @@ struct HistoryPanelView: View {
     }
 
     private var inspection: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(spacing: 14) {
-                HStack(spacing: 5) {
-                    Capsule().fill(accent).frame(width: 17, height: 2)
-                    Text("区间峰值")
-                }
-                if showsResetMarkers {
-                    HStack(spacing: 5) {
-                        Image(systemName: "diamond.fill").font(.system(size: 8)).foregroundStyle(Color.websitePurple)
-                        Text("额度恢复")
-                    }
-                    HStack(spacing: 5) {
-                        Image(systemName: "diamond.fill").font(.system(size: 8)).foregroundStyle(Color.timeBlue)
-                        Text("重置计划")
-                    }
-                }
-                Spacer()
-                Text(scale.aggregationCaption(interval: history.interval.rawValue))
-                    .lineLimit(1).foregroundStyle(.tertiary)
-            }
-            .font(.system(size: 11)).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
             Divider().opacity(0.4)
             if let event = selectedEvent {
                 eventInspection(event)
@@ -310,7 +286,7 @@ struct HistoryPanelView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("\(WidgetDateFormatter.reset(record.intervalStart)) – \(WidgetDateFormatter.reset(record.intervalEnd))")
                             .font(.system(size: 12, weight: .medium)).monospacedDigit()
-                        Text("\(record.intervalMinutes) 分钟采样 · \(record.sampleCount) 次有效观测")
+                        Text("\(record.intervalMinutes) 分钟 · \(record.sampleCount) 次")
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 0)
@@ -326,12 +302,12 @@ struct HistoryPanelView: View {
                     .font(.system(size: 11)).foregroundStyle(.secondary)
                     .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                Text("鼠标查看峰值；点击图表底部的菱形，可查看每次重置观测。")
+                Text("—")
                     .font(.system(size: 12)).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 53, alignment: .leading)
             }
         }
-        .frame(minHeight: 91, alignment: .top)
+        .frame(minHeight: 62, alignment: .top)
     }
 
     private func inspectionValue(_ title: String, value: String, color: Color) -> some View {
@@ -341,81 +317,14 @@ struct HistoryPanelView: View {
         }
     }
 
-    private var footer: some View {
-        HStack(alignment: .center, spacing: 8) {
-            if let error = history.errorMessage {
-                Image(systemName: "exclamationmark.circle").foregroundStyle(Color.paceYellow)
-                Text(error).lineLimit(2)
-            } else {
-                Text("订阅额度百分比，非精确 token 数 · 空白处没有有效采样")
-            }
-            Spacer(minLength: 0)
-        }
-        .font(.system(size: 11)).foregroundStyle(.secondary)
-    }
-
-    private var settings: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            HStack {
-                Text("历史记录设置").font(.system(size: 17, weight: .semibold))
-                Spacer()
-                Button { showingSettings = false } label: { Image(systemName: "xmark").frame(width: 20, height: 20) }
-                    .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("关闭设置")
-            }
-            Toggle("记录用量历史", isOn: Binding(get: { history.recordingEnabled }, set: { history.setRecordingEnabled($0) }))
-                .font(.system(size: 13))
-            HStack {
-                Text("记录间隔").font(.system(size: 13))
-                Spacer()
-                Picker("记录间隔", selection: Binding(get: { history.interval }, set: { history.setInterval($0) })) {
-                    ForEach(HistorySamplingInterval.allCases, id: \.rawValue) { value in Text(value.label).tag(value) }
-                }
-                .labelsHidden().pickerStyle(.menu).frame(width: 125)
-            }
-            Text("区间内保留有效观测的最高使用比例与末次比例。间隔变更只影响后续记录。")
-                .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Toggle("图表显示重置信息", isOn: $showsResetMarkers).font(.system(size: 13))
-            Divider().opacity(0.5)
-            HStack {
-                Text("本机记录占用").font(.system(size: 13))
-                Spacer()
-                Text(storageSize).font(.system(size: 13, weight: .medium)).monospacedDigit()
-            }
-            if let first = history.firstRecordedAt {
-                Text("始于 \(WidgetDateFormatter.reset(first))")
-                    .font(.system(size: 12)).foregroundStyle(.secondary)
-            }
-            HStack {
-                Text("清理此日期之前").font(.system(size: 13))
-                Spacer(minLength: 4)
-                DatePicker("清理此日期之前", selection: $cleanupDate, in: ...Date(), displayedComponents: [.date])
-                    .labelsHidden().datePickerStyle(.compact).fixedSize()
-            }
-            Button(role: .destructive) {
-                showingSettings = false
-                confirmingDeletion = true
-            } label: {
-                Label("删除此日期之前的记录", systemImage: "trash")
-                    .font(.system(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .buttonStyle(.plain)
-            .disabled(history.storageBytes == 0 && history.firstRecordedAt == nil)
-        }
-        .padding(20).frame(width: 320)
-    }
-
-    private var storageSize: String { ByteCountFormatter.string(fromByteCount: history.storageBytes, countStyle: .file) }
-    private var cleanupDateText: String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.timeZone = .autoupdatingCurrent
-        formatter.dateFormat = "yyyy/MM/dd"
-        return formatter.string(from: cleanupDate)
-    }
-
     private func rememberWindows() {
         var unique: [String: HistoryWindowOption] = [:]
         for record in history.records {
+            let option = HistoryWindowOption(provider: record.provider, id: record.windowID,
+                                             name: record.windowName, duration: record.durationSeconds)
+            unique[record.provider.rawValue + ":" + record.windowID] = option
+        }
+        for record in history.resetHistory {
             let option = HistoryWindowOption(provider: record.provider, id: record.windowID,
                                              name: record.windowName, duration: record.durationSeconds)
             unique[record.provider.rawValue + ":" + record.windowID] = option
@@ -459,8 +368,9 @@ struct HistoryPanelView: View {
     private func inspect(at location: CGPoint, proxy: ChartProxy, geometry: GeometryProxy, plot: HistoryPlot) {
         let frame = geometry[proxy.plotAreaFrame]
         guard frame.contains(location), let date: Date = proxy.value(atX: location.x - frame.minX) else { return }
+        pinnedReset = nil
         if showsResetMarkers && location.y >= frame.maxY - 25,
-           let event = plot.events.min(by: { abs($0.observedAt.timeIntervalSince(date)) < abs($1.observedAt.timeIntervalSince(date)) }),
+           let event = visibleEvents.min(by: { abs($0.observedAt.timeIntervalSince(date)) < abs($1.observedAt.timeIntervalSince(date)) }),
            let position = proxy.position(forX: event.observedAt), abs(position - (location.x - frame.minX)) <= 9 {
             selectedEventID = event.id
             selectedID = nil
@@ -486,51 +396,92 @@ struct HistoryPanelView: View {
             }
             Text("观测区间 \(WidgetDateFormatter.reset(event.primary.previousObservedAt)) – \(WidgetDateFormatter.reset(event.observedAt))")
                 .font(.system(size: 11)).foregroundStyle(.secondary).monospacedDigit()
-            Text(event.hasRecovery ? "额度恢复发生在前后观测之间；点击标记查看计划变化。" : "仅观察到计划信息变化，尚不能确认额度实际恢复。")
-                .font(.system(size: 11)).foregroundStyle(.secondary)
         }
     }
 
     private var eventList: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("重置观测").font(.system(size: 16, weight: .semibold))
-                Text("\(cachedPlot.events.count)").font(.system(size: 13)).monospacedDigit().foregroundStyle(.secondary)
+                Text("重置历史").font(.system(size: 16, weight: .semibold))
+                Text("\(history.resetHistory.count)").font(.system(size: 13)).monospacedDigit().foregroundStyle(.secondary)
                 Spacer()
+                if history.isLoadingResetHistory { ProgressView().controlSize(.small) }
                 Button { showingEventList = false } label: { Image(systemName: "xmark").frame(width: 20, height: 20) }
-                    .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("关闭重置记录列表")
+                    .buttonStyle(.plain).foregroundStyle(.secondary).accessibilityLabel("关闭重置历史")
             }
-            ScrollView {
-                LazyVStack(spacing: 2) {
-                    ForEach(Array(cachedPlot.events.reversed())) { event in
-                        Button {
-                            selectedEventID = event.id
-                            selectedID = nil
-                            showingEventList = false
-                        } label: {
-                            VStack(alignment: .leading, spacing: 4) {
-                                HStack {
-                                    Text(WidgetDateFormatter.reset(event.observedAt))
-                                        .foregroundStyle(.secondary).font(.system(size: 12)).monospacedDigit()
-                                    Spacer(minLength: 4)
-                                    Text("\(percent(event.primary.previousUsedPercent)) → \(percent(event.primary.usedPercent))")
-                                        .foregroundStyle(eventColor(event)).font(.system(size: 13, weight: .medium)).monospacedDigit()
+            if history.resetHistory.isEmpty && !history.isLoadingResetHistory {
+                Text("暂无重置记录").font(.system(size: 13)).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(history.resetHistory.sorted { $0.observedAt > $1.observedAt }) { record in
+                            Button { selectReset(record) } label: {
+                                HStack(alignment: .center, spacing: 8) {
+                                    ProviderBrandIcon(brand: record.provider == .codex ? .codex : .claude)
+                                        .frame(width: 18, height: 18)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack {
+                                            Text(resetHistoryDate(record.observedAt)).font(.system(size: 12)).monospacedDigit()
+                                            Spacer(minLength: 4)
+                                            Text("重置前 \(percent(record.previousUsedPercent))")
+                                                .font(.system(size: 13, weight: .medium)).monospacedDigit().foregroundStyle(Color.websitePurple)
+                                        }
+                                        Text("\(record.provider.name) · \(record.windowName)")
+                                            .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                                    }
                                 }
-                                Text(eventTitle(event)).font(.system(size: 12, weight: .medium)).foregroundStyle(eventColor(event))
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 8)
+                                .contentShape(Rectangle())
                             }
-                            .frame(maxWidth: .infinity, alignment: .leading).padding(8)
-                            .background(selectedEventID == event.id ? eventColor(event).opacity(0.08) : Color.clear)
-                            .contentShape(Rectangle())
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("\(record.provider.name)，\(resetHistoryDate(record.observedAt))，重置前使用 \(percent(record.previousUsedPercent))")
+                            .accessibilityHint("定位到这次重置")
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(eventTitle(event) + "，" + eventSummary(event))
-                        .accessibilityHint("选择后在图表下方查看详情")
                     }
                 }
             }
-            Text("当前窗口与时间范围 · 选择一条查看详情")
-                .font(.system(size: 11)).foregroundStyle(.secondary)
-        }.padding(16).frame(width: 320, height: 320)
+        }.padding(16).frame(width: 340, height: 320)
+    }
+
+    private func selectReset(_ record: HistoryResetRecord) {
+        latestDate = Date()
+        let span = range.duration
+        let firstEnd = min(latestDate, earliestDate.addingTimeInterval(span))
+        provider = record.provider
+        windowID = record.windowID
+        pinnedReset = record
+        selectedEventID = record.id
+        selectedID = nil
+        followsPresent = false
+        referenceDate = min(latestDate, max(firstEnd, record.observedAt.addingTimeInterval(span / 2)))
+        showingEventList = false
+    }
+
+    private func prepareSelectionForViewChange() {
+        selectedID = nil
+        if let record = pinnedReset, record.provider == provider, record.windowID == effectiveWindowID,
+           record.observedAt >= range.start, record.observedAt <= range.end {
+            selectedEventID = record.id
+        } else {
+            pinnedReset = nil
+            selectedEventID = nil
+        }
+    }
+
+    private func resetEvent(_ record: HistoryResetRecord) -> HistoryPlot.Event {
+        HistoryPlot.Event(events: [HistoryResetEvent(id: record.id, kind: .usageDrop,
+            observedAt: record.observedAt, previousObservedAt: record.previousObservedAt,
+            previousUsedPercent: record.previousUsedPercent, usedPercent: record.usedPercent,
+            previousResetsAt: record.previousResetsAt, resetsAt: record.resetsAt)])
+    }
+
+    private func resetHistoryDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.dateFormat = "yyyy/MM/dd HH:mm"
+        return formatter.string(from: date)
     }
 
     private func eventDetails(_ event: HistoryPlot.Event) -> some View {
@@ -556,8 +507,8 @@ struct HistoryPanelView: View {
             Text(event.events.map { eventKindTitle($0.kind) }.joined(separator: " · "))
                 .font(.system(size: 12, weight: .medium)).foregroundStyle(eventColor(event))
             Text(event.hasRecovery
-                ? "这次刷新确认额度有所恢复。实际发生时间位于前后两次观测之间，无法精确到某一分钟。"
-                : "重置计划来自服务端刷新结果；计划更新或到期本身不代表额度已经恢复。")
+                ? "恢复发生于两次观测之间。"
+                : "计划信息，尚未确认额度恢复。")
                 .font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }.padding(20).frame(width: 350)
     }
@@ -591,15 +542,9 @@ struct HistoryPanelView: View {
     private func percent(_ value: Double) -> String { "\(Int(value.rounded()))%" }
 
     private func recordDetail(_ record: UsageHistoryRecord) -> String {
-        let recoveries = record.resetEvents.filter { $0.kind == .usageDrop }
-        if let recovery = recoveries.last {
-            return "\(WidgetDateFormatter.reset(recovery.observedAt)) 观察到\(recovery.isEarlyRecovery ? "提前额度恢复" : "额度恢复")：\(percent(recovery.previousUsedPercent)) → \(percent(recovery.usedPercent))。峰值仍包含恢复前的观测。"
-        }
-        if let change = record.resetEvents.last {
-            return "\(WidgetDateFormatter.reset(change.observedAt)) 观察到重置时间变化；仅记录服务端信息。末次观测 \(WidgetDateFormatter.reset(record.lastObservedAt))。"
-        }
-        return "末次观测 \(WidgetDateFormatter.reset(record.lastObservedAt)) · 重置时间为服务端计划时间，恢复情况以实际观测为准。"
+        "峰值 \(WidgetDateFormatter.reset(record.peakObservedAt ?? record.firstObservedAt)) · 末次 \(WidgetDateFormatter.reset(record.lastObservedAt))"
     }
+
 }
 
 private struct HistoryWindowOption: Identifiable, Equatable {

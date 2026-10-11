@@ -65,7 +65,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var panel: NSPanel!
     private var handle: NSPanel!
     private var store: MonitorStore!
-    private var historyWindow: NSWindow?
+    private var isDetailed = false
+    private var detailedSize = NSSize(width: 740, height: 550)
     private var expandedFrame = NSRect.zero
     private var naturalHeight: CGFloat = 176
     private var naturalHandleSize = EdgeHandleView.size
@@ -81,18 +82,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var transitionStep: ((CGFloat) -> Void)?
     private var transitionCompletion: (() -> Void)?
 
-    private var preferredWidth: CGFloat { WidgetLayout.panelWidth(compact: store.compact) }
+    private var regularWidth: CGFloat { WidgetLayout.panelWidth(compact: store.compact) }
+    private var preferredWidth: CGFloat { isDetailed ? detailedSize.width : regularWidth }
+    private var preferredHeight: CGFloat { isDetailed ? detailedSize.height : naturalHeight }
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        store = MonitorStore(demo: CommandLine.arguments.contains("--demo"))
-        let content = MonitorView(store: store,
+    private func quotaContent() -> MonitorView {
+        MonitorView(store: store,
             onClose: { [weak self] in self?.hidePanels() },
             onToggleCompact: { [weak self] in self?.toggleCompact() },
             onToggleEdge: { [weak self] in self?.toggleEdge() },
-            onOpenHistory: { [weak self] in self?.openHistory() },
+            onOpenHistory: { [weak self] in self?.toggleDetailed() },
             onHeightChange: { [weak self] height in
                 DispatchQueue.main.async { self?.resizeContent(to: height) }
             })
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        store = MonitorStore(demo: CommandLine.arguments.contains("--demo"))
+        let content = quotaContent()
         panel = FloatingQuotaPanel(contentRect: NSRect(x: 0, y: 0, width: preferredWidth, height: naturalHeight),
             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.contentView = FloatingWindowGlassView.hosting(content,
@@ -208,13 +215,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         isPositioning = true
         panel.setFrame(expandedFrame, display: true)
         panel.invalidateShadow()
-        panel.saveFrame(usingName: "TokenMonitorFloatingPanel")
+        if !isDetailed { panel.saveFrame(usingName: "TokenMonitorFloatingPanel") }
         isPositioning = false
     }
 
     private func resizeContent(to height: CGFloat) {
         guard panel != nil, height.isFinite, height > 0 else { return }
         naturalHeight = max(116, ceil(height))
+        guard !isDetailed else { return }
         let available = screen(for: expandedFrame)?.visibleFrame
         let newHeight = min(naturalHeight, available?.height ?? naturalHeight)
         let newWidth = min(preferredWidth, available?.width ?? preferredWidth)
@@ -318,7 +326,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private func expandedFrame(anchoredTo anchor: NSRect) -> NSRect {
         guard let available = screen(for: anchor)?.visibleFrame else { return expandedFrame }
         let size = NSSize(width: min(preferredWidth, available.width),
-            height: min(naturalHeight, available.height))
+            height: min(preferredHeight, available.height))
         let x: CGFloat
         switch edge {
         case .left: x = anchor.minX
@@ -452,6 +460,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
 
     @objc private func toggleEdge() {
         if isCollapsed { expandFromEdge(); return }
+        if isDetailed { setDetailed(false, animated: false) }
         setExpandedFrame(panel.frame)
         prepareHandlePlacement(from: expandedFrame)
         isCollapsed = true
@@ -464,7 +473,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         finishPanelTransition()
         var frame = expandedFrame
         if let available = screen(for: frame)?.visibleFrame {
-            let height = min(naturalHeight, available.height)
+            let height = min(preferredHeight, available.height)
             frame.origin.y += frame.height - height
             frame.size = NSSize(width: min(preferredWidth, available.width), height: height)
         }
@@ -475,15 +484,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     func windowDidMove(_ notification: Notification) {
         guard notification.object as? NSWindow === panel, !isPositioning, !isCollapsed else { return }
         expandedFrame = panel.frame
-        panel.saveFrame(usingName: "TokenMonitorFloatingPanel")
+        if !isDetailed { panel.saveFrame(usingName: "TokenMonitorFloatingPanel") }
     }
 
-    func windowWillClose(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow, window === historyWindow else { return }
-        window.saveFrame(usingName: "TokenMonitorHistoryPanel")
-        window.contentView = nil
-        historyWindow = nil
-        store.history.closePanel()
+    func windowDidResize(_ notification: Notification) {
+        guard notification.object as? NSWindow === panel, isDetailed, !isPositioning else { return }
+        detailedSize = panel.frame.size
+        expandedFrame = panel.frame
+        panel.invalidateShadow()
     }
 
     func menuNeedsUpdate(_ menu: NSMenu) {
@@ -507,36 +515,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     }
 
     @objc private func openHistory() {
-        if historyWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 740, height: 550),
-                styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-            window.title = "用量历史"
-            window.delegate = self
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
-            window.isReleasedWhenClosed = false
-            window.contentMinSize = NSSize(width: 640, height: 440)
-            window.level = .floating
-            window.setFrameAutosaveName("TokenMonitorHistoryPanel")
-            let glass = NSVisualEffectView(frame: window.contentView?.bounds ?? .zero)
-            glass.material = .underWindowBackground
-            glass.blendingMode = .behindWindow
-            glass.state = .active
-            let host = NSHostingView(rootView: HistoryPanelView(history: store.history))
-            host.translatesAutoresizingMaskIntoConstraints = false
-            glass.addSubview(host)
-            NSLayoutConstraint.activate([
-                host.leadingAnchor.constraint(equalTo: glass.leadingAnchor),
-                host.trailingAnchor.constraint(equalTo: glass.trailingAnchor),
-                host.topAnchor.constraint(equalTo: glass.topAnchor),
-                host.bottomAnchor.constraint(equalTo: glass.bottomAnchor)
-            ])
-            window.contentView = glass
-            if !window.setFrameUsingName("TokenMonitorHistoryPanel") { window.center() }
-            historyWindow = window
+        if isCollapsed { expandFromEdge() }
+        if !isDetailed { setDetailed(true) }
+        panel.orderFrontRegardless()
+        panel.makeKey()
+    }
+
+    private func toggleDetailed() { setDetailed(!isDetailed) }
+
+    private func setDetailed(_ value: Bool, animated: Bool = true) {
+        guard value != isDetailed else { return }
+        finishPanelTransition()
+        let anchor = panel.frame
+        isPositioning = true
+        if value {
+            panel.saveFrame(usingName: "TokenMonitorFloatingPanel")
+            panel.setFrameAutosaveName("")
+        } else { detailedSize = anchor.size }
+        isDetailed = value
+        (panel as? FloatingQuotaPanel)?.allowsKeyboardFocus = value
+        panel.contentMinSize = value ? NSSize(width: 640, height: 440) : .zero
+        if value { panel.styleMask.insert(.resizable) }
+        else { panel.styleMask.remove(.resizable) }
+        let size = NSSize(width: preferredWidth, height: preferredHeight)
+        let x: CGFloat
+        switch edge {
+        case .left: x = anchor.minX
+        case .right: x = anchor.maxX - size.width
+        case .top: x = anchor.midX - size.width / 2
         }
-        NSApplication.shared.activate(ignoringOtherApps: true)
-        historyWindow?.makeKeyAndOrderFront(nil)
+        let frame = constrained(NSRect(x: x, y: anchor.maxY - size.height, width: size.width, height: size.height))
+        if value {
+            let content = HistoryPanelView(history: store.history,
+                onToggleExpanded: { [weak self] in self?.toggleDetailed() },
+                onClose: { [weak self] in self?.hidePanels() })
+            panel.contentView = FloatingWindowGlassView.hosting(content, frame: NSRect(origin: .zero, size: frame.size))
+        } else {
+            panel.contentView = FloatingWindowGlassView.hosting(quotaContent(), frame: NSRect(origin: .zero, size: frame.size))
+            store.history.closePanel()
+        }
+        expandedFrame = frame
+        isPositioning = true
+        panel.setFrame(frame, display: true, animate: animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+        isPositioning = false
+        panel.invalidateShadow()
+        if value { panel.makeKey() }
+        else {
+            panel.resignKey()
+            panel.setFrameAutosaveName("TokenMonitorFloatingPanel")
+            panel.saveFrame(usingName: "TokenMonitorFloatingPanel")
+        }
     }
 
     @objc private func refresh() { store.refreshNow(force: true) }
@@ -552,6 +580,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc private func quit() { hidePanels(); store.stop(); NSApplication.shared.terminate(nil) }
     func applicationWillTerminate(_ notification: Notification) {
         cancelPanelTransition()
+        if isDetailed { setDetailed(false, animated: false) }
         if panel != nil { panel.saveFrame(usingName: "TokenMonitorFloatingPanel") }
         saveHandlePlacement()
         store?.stop()

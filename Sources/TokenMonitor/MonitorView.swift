@@ -19,7 +19,7 @@ struct MonitorView: View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             VStack(spacing: 8) {
                 providerArea(at: context.date)
-                ResetNewsRow(state: store.resetNews, now: context.date, openHistory: onOpenHistory)
+                ResetNewsRow(state: store.resetNews, history: store.history, now: context.date)
             }
             .padding(WidgetLayout.panelInset)
             .frame(width: WidgetLayout.panelWidth(compact: store.compact))
@@ -70,7 +70,7 @@ struct MonitorView: View {
         return VStack(spacing: 8) {
             ProviderCard(state: store.codex, accent: .codexGreen, brand: .codex,
                 compact: store.compact, now: now, sourceDescription: "Codex 官方服务端额度", websiteNews: store.resetNews,
-                refresh: refreshAction,
+                refresh: refreshAction, openHistory: onOpenHistory,
                 toggleEdge: onToggleEdge, close: onClose, onDoubleClick: onToggleEdge)
             Divider().opacity(0.28)
             ProviderCard(state: store.claude, accent: .claudeOrange, brand: .claude,
@@ -92,6 +92,7 @@ private struct ProviderCard: View {
     var websiteNews: ResetNewsState? = nil
     var setupMessage: String? = nil
     var refresh: (() -> Void)? = nil
+    var openHistory: (() -> Void)? = nil
     var toggleEdge: (() -> Void)? = nil
     var close: (() -> Void)? = nil
     var isConnecting = false
@@ -135,7 +136,7 @@ private struct ProviderCard: View {
     }
 
     private var header: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 3) {
             ProviderBrandIcon(brand: brand)
                 .frame(width: 22, height: 22)
                 .frame(width: 26, height: 26)
@@ -181,6 +182,9 @@ private struct ProviderCard: View {
             }
             if let login {
                 IconAction(symbol: "person.crop.circle", label: "登录 Claude Code", action: login)
+            }
+            if let openHistory {
+                IconAction(symbol: "arrow.up.left.and.arrow.down.right", label: "展开用量与重置历史", action: openHistory)
             }
             if let refresh {
                 IconAction(symbol: "arrow.clockwise", label: "立即刷新额度", isLoading: state.isLoading, action: refresh)
@@ -350,8 +354,9 @@ private struct QuotaBar: View {
 
 private struct ResetNewsRow: View {
     let state: ResetNewsState
+    @ObservedObject var history: UsageHistoryStore
     let now: Date
-    var openHistory: () -> Void = {}
+    @WidgetState(initialValue: false) private var showingSettings: Bool
 
     private var warning: String {
         [state.message, state.freshnessWarning(at: now)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
@@ -379,7 +384,10 @@ private struct ResetNewsRow: View {
                     .frame(width: 16, height: 16).accessibilityLabel("正在更新网站消息")
             }
             Spacer(minLength: 3)
-            IconAction(symbol: "chart.xyaxis.line", label: "打开用量历史与记录设置", action: openHistory)
+            IconAction(symbol: "gearshape", label: "设置", action: { showingSettings = true })
+                .popover(isPresented: $showingSettings, arrowEdge: .top) {
+                    HistorySettingsView(history: history, onClose: { showingSettings = false })
+                }
             InfoButton(symbol: warning.isEmpty ? "info.circle" : "exclamationmark.triangle",
                 label: warning.isEmpty ? "查看公共重置消息与更新时间" : "查看公共重置消息与警告",
                 color: warning.isEmpty ? .secondary : .orange) { newsDetails }

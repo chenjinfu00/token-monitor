@@ -29,7 +29,9 @@ struct HistoryChecks {
         try observe(recorder, 80, seconds: 10)
         try observe(recorder, 90, seconds: 120)
         try observe(recorder, 5, seconds: 180)
-        require(try recorder.storageBytes() == 0, "Live polling must not write an incomplete interval")
+        require(try UsageHistoryRecorder.read(directory: url, range: range).isEmpty, "Live polling must not write an incomplete quota interval")
+        let resetBytes = try recorder.storageBytes()
+        require(resetBytes > 0, "Observed resets are journaled immediately even before the interval boundary")
         let pending = recorder.pendingRecords[0]
         require(pending.peakUsedPercent == 90 && pending.lastUsedPercent == 5, "Keep interval peak and post-reset usage separately")
         require(pending.sampleCount == 3, "Count real observations")
@@ -39,7 +41,7 @@ struct HistoryChecks {
         require(pending.resetEvents[0].previousUsedPercent == 90 && pending.resetEvents[0].usedPercent == 5, "Keep recovery endpoints")
         let stableID = pending.id
         try recorder.flush(at: base.addingTimeInterval(899))
-        require(try recorder.storageBytes() == 0, "Flush before boundary must remain memory-only")
+        require(try recorder.storageBytes() == resetBytes, "Flush before boundary writes no regular quota snapshot")
         try recorder.flush(at: base.addingTimeInterval(900))
         let rows = try UsageHistoryRecorder.read(directory: url, range: range)
         require(rows.count == 1 && rows[0].id == stableID && rows[0].peakUsedPercent == 90, "Persist exactly one interval row with stable ID")
@@ -309,7 +311,7 @@ struct HistoryChecks {
         try recorder.flush(at: base.addingTimeInterval(2800), force: true)
         require(try recorder.read(range: range).isEmpty, "Removed pending intervals cannot reappear during a later flush")
         let bytes = try recorder.storageBytes()
-        require(recorder.firstRecordedAt == nil && bytes == 0, "Removing all eligible history resets size and first timestamp")
+        require(recorder.firstRecordedAt == nil && bytes < 1024, "Removing eligible history leaves only a compact anti-revival cleanup marker")
     }
 
     static func deleteAcrossMonthsRebuildsRestartCheckpoint() throws {
@@ -357,6 +359,84 @@ struct HistoryChecks {
         require(try UsageHistoryRecorder.read(directory: url, range: range).count == 1, "Rejected deletion leaves the archive intact")
     }
 
+    static func immediateResetJournalSurvivesRestartWithoutQuotaFlush() throws {
+        let url = try directory(); defer { try? FileManager.default.removeItem(at: url) }
+        var recorder: UsageHistoryRecorder? = try UsageHistoryRecorder(directory: url)
+        try observe(recorder!, 95, seconds: 10)
+        require(try recorder!.storageBytes() == 0, "Ordinary observations remain memory-only")
+        try observe(recorder!, 1, seconds: 120)
+        require(recorder!.resetRevision == 1, "A newly persisted reset changes only the reset revision")
+        require(try UsageHistoryRecorder.read(directory: url, range: range).isEmpty, "An immediate reset never forces the regular quota interval to disk")
+        recorder = nil
+        let rows = try UsageHistoryRecorder.readResetHistory(directory: url)
+        require(rows.count == 1 && rows[0].previousUsedPercent == 95 && rows[0].usedPercent == 1, "Before/after quota survives a restart before the 15-minute flush")
+        require(rows[0].provider == .codex && rows[0].windowID == "codex.primary" && rows[0].previousObservedAt == base.addingTimeInterval(10), "Independent reset log retains its provider, window, and last real observation")
+        let reopened = try UsageHistoryRecorder(directory: url)
+        try observe(reopened, 1, seconds: 120)
+        require(reopened.pendingRecords.isEmpty && reopened.resetRevision == 0, "Restored post-reset baseline deduplicates the same delivered snapshot")
+        try observe(reopened, 3, seconds: 180, reset: base.addingTimeInterval(20_000))
+        require(reopened.resetRevision == 0, "Schedule-only changes do not create independent reset rows")
+        try observe(reopened, 0, seconds: 240, reset: base.addingTimeInterval(20_000))
+        require(try reopened.readResetHistory().count == 2, "A later distinct replenishment has its own independent entry")
+        let archive = try ResetHistoryArchive(directory: url)
+        let duplicate = HistoryResetRecord(id: UUID(), provider: rows[0].provider, windowID: rows[0].windowID,
+            windowName: rows[0].windowName, observedAt: rows[0].observedAt, previousObservedAt: rows[0].previousObservedAt,
+            previousUsedPercent: rows[0].previousUsedPercent, usedPercent: rows[0].usedPercent,
+            previousResetsAt: rows[0].previousResetsAt, resetsAt: rows[0].resetsAt, durationSeconds: rows[0].durationSeconds)
+        require(try archive.append([duplicate]) == 0, "Retrying the same observed reset with a new UUID cannot duplicate it")
+    }
+
+    static func legacyResetRecord() -> UsageHistoryRecord {
+        let first = HistoryResetEvent(id: UUID(), kind: .usageDrop, observedAt: base.addingTimeInterval(110),
+            previousObservedAt: base.addingTimeInterval(10), previousUsedPercent: 95, usedPercent: 0,
+            previousResetsAt: base.addingTimeInterval(100), resetsAt: base.addingTimeInterval(1000))
+        let schedule = HistoryResetEvent(id: UUID(), kind: .deadlineChanged, observedAt: first.observedAt,
+            previousObservedAt: first.previousObservedAt, previousUsedPercent: 95, usedPercent: 0,
+            previousResetsAt: first.previousResetsAt, resetsAt: first.resetsAt)
+        let second = HistoryResetEvent(id: UUID(), kind: .usageDrop, observedAt: base.addingTimeInterval(200),
+            previousObservedAt: base.addingTimeInterval(180), previousUsedPercent: 80, usedPercent: 1,
+            previousResetsAt: base.addingTimeInterval(1000), resetsAt: base.addingTimeInterval(1000))
+        return UsageHistoryRecord(id: UUID(), schemaVersion: 1, provider: .claude, windowID: "five_hour", windowName: "5小时额度",
+            intervalStart: base, intervalEnd: base.addingTimeInterval(900), firstObservedAt: base.addingTimeInterval(10),
+            lastObservedAt: base.addingTimeInterval(200), peakUsedPercent: 95, lastUsedPercent: 1,
+            resetsAt: second.resetsAt, durationSeconds: 18_000, resetEvents: [first, schedule, second],
+            sampleCount: 4, intervalMinutes: 15, peakObservedAt: base.addingTimeInterval(10))
+    }
+
+    static func legacyResetMigrationIsCompleteAndIdempotent() throws {
+        let url = try directory(); defer { try? FileManager.default.removeItem(at: url) }
+        let legacy = legacyResetRecord()
+        try writeFixtures([legacy], directory: url)
+        let recorder = try UsageHistoryRecorder(directory: url)
+        let bytesBefore = try recorder.storageBytes()
+        let rows = try UsageHistoryRecorder.readResetHistory(directory: url)
+        require(rows.count == 2 && Set(rows.map(\.id)) == Set(legacy.resetEvents.filter { $0.kind == .usageDrop }.map(\.id)), "Legacy migration saves every observed replenishment once and excludes schedule-only events")
+        let bytesAfter = try recorder.storageBytes()
+        require(bytesAfter > bytesBefore, "Storage size includes the independent reset archive and index")
+        let repeated = try UsageHistoryRecorder.readResetHistory(directory: url)
+        require(repeated == rows, "Opening reset history again does not duplicate legacy entries")
+        require(try recorder.storageBytes() == bytesAfter, "Completed migration performs no repeated archive writes")
+    }
+
+    static func resetDateCleanupCannotReviveCrossingBucketEvents() throws {
+        let url = try directory(); defer { try? FileManager.default.removeItem(at: url) }
+        try writeFixtures([legacyResetRecord()], directory: url)
+        try Data("keep".utf8).write(to: url.appendingPathComponent("claude-quota.json"))
+        let recorder = try UsageHistoryRecorder(directory: url)
+        // Delete before ever opening/migrating the legacy reset journal.
+        try recorder.remove(before: base.addingTimeInterval(150), at: base.addingTimeInterval(250))
+        require(try recorder.read(range: range).count == 1, "A crossing regular interval is retained whole")
+        let first = try recorder.readResetHistory()
+        require(first.count == 1 && first[0].observedAt == base.addingTimeInterval(200), "Legacy migration respects date cleanup even though an old event remains inside a retained crossing bucket")
+        try recorder.remove(before: base.addingTimeInterval(201), at: base.addingTimeInterval(250))
+        let reopened = try UsageHistoryRecorder(directory: url)
+        require(try reopened.readResetHistory().isEmpty, "Restart and repeated migration cannot resurrect removed independent reset events")
+        try reopened.clear(at: base.addingTimeInterval(300))
+        require(try reopened.storageBytes() == 0, "Clear includes reset monthly files and the reset index")
+        require(FileManager.default.fileExists(atPath: url.appendingPathComponent("claude-quota.json").path), "Reset cleanup never deletes neighboring quota/auth sources")
+        require(try UsageHistoryRecorder.readResetHistory(directory: url).isEmpty, "Cleared legacy events cannot be imported again")
+    }
+
     static func monthlyArchiveAndRangeReads() throws {
         let url = try directory(); defer { try? FileManager.default.removeItem(at: url) }
         let recorder = try UsageHistoryRecorder(directory: url)
@@ -389,7 +469,10 @@ struct HistoryChecks {
         try deleteBeforeDateKeepsCrossingIntervalAndNewPending()
         try deleteAcrossMonthsRebuildsRestartCheckpoint()
         try dateDeletionSkipsCorruptLinesAndRefusesSymlinks()
+        try immediateResetJournalSurvivesRestartWithoutQuotaFlush()
+        try legacyResetMigrationIsCompleteAndIdempotent()
+        try resetDateCleanupCannotReviveCrossingBucketEvents()
         try monthlyArchiveAndRangeReads()
-        print("16 quota-history persistence, peak, recovery, restart, gaps, settings, corruption and clear checks passed")
+        print("19 quota-history persistence, peak, recovery, restart, gaps, settings, corruption and clear checks passed")
     }
 }

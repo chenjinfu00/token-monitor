@@ -2,13 +2,13 @@
 
 macOS 屏幕常驻小窗，显示 **Codex 与 Claude Code 的编程订阅剩余额度和重置时间**。品牌图标使用原版结形和放射形的透明矢量，没有图标底框。原生毛玻璃背景，可拖动、隐藏，或收起为屏幕边缘的 48 像素缩略窗。
 
-[下载 DMG](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.8.0/Token-Monitor-0.8.0-macos-universal.dmg) · [安装与登录](#下载与安装) · [MIT 许可证](LICENSE)
+[下载 DMG](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.8.1/Token-Monitor-0.8.1-macos-universal.dmg) · [安装与登录](#下载与安装) · [MIT 许可证](LICENSE)
 
 显示的是服务返回的额度百分比，不是精确 token 数，也不覆盖普通 ChatGPT 网页聊天的所有用量。需要 macOS 13 或更新版本。
 
 ## 下载与安装
 
-1. 下载 [DMG 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.8.0/Token-Monitor-0.8.0-macos-universal.dmg) 或 [ZIP 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.8.0/Token-Monitor-0.8.0-macos-universal.zip)。两者同时支持 Apple Silicon 与 Intel。
+1. 下载 [DMG 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.8.1/Token-Monitor-0.8.1-macos-universal.dmg) 或 [ZIP 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.8.1/Token-Monitor-0.8.1-macos-universal.zip)。两者同时支持 Apple Silicon 与 Intel。
 2. ZIP 解压后，将 **Token Monitor.app** 拖到 Finder 的“应用程序”。如果下载的是 DMG，打开后将应用拖到“应用程序”。
 3. 从“应用程序”双击 **Token Monitor**。应用会显示悬浮窗和菜单栏双行额度图标，不显示 Dock 图标。悬停在图标上可查看监控说明。
 
@@ -68,13 +68,13 @@ python3 "$HOME/.claude/token-monitor/bridge.py" uninstall
 
 ## 用量历史
 
-展开小窗底部的折线图图标，或菜单栏“用量历史”，打开独立的历史面板；小窗尺寸保持不变。支持连续横向滚动的时间轴，可切换 Codex / Claude 和额度周期；5 小时、日、周、月、年调整同屏时间跨度与曲线密度，不按日期分页。滚轮或触控板滚动查看过去，点击“现在”返回最新位置。移动鼠标或点击数据点可查看该段的最高已用比例、末次比例和观测时间。图表底部用紫色菱形标记观察到的额度恢复，蓝色菱形标记重置计划变化；点击标记可查看前后使用比例、前后重置期限及两次刷新的观察时间范围。真正的重置可能发生在这个范围内，观察时刻不等同于精确发生时刻。
+点击刷新按钮左侧的展开按钮，或菜单栏“用量历史”，在同一个悬浮窗进入详细图表；右上角收起按钮返回紧凑额度视图。支持连续横向滚动的时间轴，可切换 Codex / Claude 和额度周期；5 小时、日、周、月、年调整同屏时间跨度与曲线密度，不按日期分页。滚轮或触控板滚动查看过去，点击“现在”返回最新位置。移动鼠标或点击数据点可查看该段的最高已用比例、末次比例和观测时间。右上角的重置历史可跨图表时间范围查看各次重置前的已用比例；独立重置日志在确认额度回补时立即保存，重启后仍可查看。只有期限变化时不会计作额度重置。图表底部用紫色菱形标记观察到的额度恢复，蓝色菱形标记重置计划变化；点击标记可查看前后使用比例、前后重置期限及两次刷新的观察时间范围。真正的重置可能发生在这个范围内，观察时刻不等同于精确发生时刻。
 
 默认每 **15 分钟**保存一个时间段，每家服务的每个额度周期分别记录这段里**实际观察到的最高已用百分比**、末次百分比、同步次数、服务提供的重置时间，以及观察到的额度回补或期限变化。图中显示已用百分比，与实时小窗的剩余百分比互补；不能换算精确 token 数，也不是该段新增消耗的百分比。历史从启用记录后开始，之前的用量不会补造。
 
 实时查询保持每分钟进行，观察结果在内存中合并，完成时间段后才写入磁盘。休眠、退出或查询失败期间不会补造样本，缺口和额度回补处不连接趋势线。较长视图按更大时间段取峰值，原始记录保留。期限变化只表示官方计划变化，不等同于账户实际恢复；回补以实际看到的使用比例下降为依据。
 
-面板右上角的设置可暂停记录，把保存间隔设为 **1、5、15、30 分钟或 1 小时**，查看历史文件占用，并清理所选年月日之前的记录。清理前会再次确认截止日期，保留当天和之后的数据；跨越截止时刻的整个记录区间也会保留。修改间隔只影响之后的记录，现有历史保留。暂停、改设置和正常退出会保存尚未完成的时间段；强制结束应用或断电可能丢失当前未保存的一段。日期清理只处理本应用历史，不影响登录、实时额度、Claude 采集配置或窗口偏好。
+主窗口底部的设置可暂停记录，把保存间隔设为 **1、5、15、30 分钟或 1 小时**，查看历史文件占用，并清理所选年月日之前的记录。清理前会再次确认截止日期，保留当天和之后的数据；跨越截止时刻的整个记录区间也会保留。修改间隔只影响之后的记录，现有历史保留。暂停、改设置和正常退出会保存尚未完成的时间段；强制结束应用或断电可能丢失当前未保存的一段。日期清理只处理本应用历史，不影响登录、实时额度、Claude 采集配置或窗口偏好。
 
 ## 数据来源与新鲜度
 
@@ -132,12 +132,12 @@ zsh build.sh
 
 构建输出为 `dist/Token Monitor.app`，默认构建当前电脑的架构。构建 Intel + Apple Silicon 通用应用使用 `zsh build.sh --universal`；生成可下载的 ZIP、DMG 和校验文件使用 `zsh tools/package-release.sh`。下载发行包不需要 Swift 工具链。测试入口优先使用已有的 Anaconda Python，否则使用 `PATH` 中的 `python3`，不会安装依赖。测试只使用固定样例和临时目录，不访问账户、不发起模型请求，也不修改真实 Claude 设置。
 
-当前安装包保存在 [`downloads/v0.8.0/`](downloads/v0.8.0/)，同目录提供 `SHA256SUMS.txt`。另提供 GitHub Actions 发行工作流：推送版本标签（如 `v0.8.0`）后测试、构建并上传到 Releases。主分支和 Pull Request 的独立检查只测试及构建，不发布安装包。当前没有自动更新，请从仓库下载新版本后替换应用。
+当前安装包保存在 [`downloads/v0.8.1/`](downloads/v0.8.1/)，同目录提供 `SHA256SUMS.txt`。另提供 GitHub Actions 发行工作流：推送版本标签（如 `v0.8.1`）后测试、构建并上传到 Releases。主分支和 Pull Request 的独立检查只测试及构建，不发布安装包。当前没有自动更新，请从仓库下载新版本后替换应用。
 
 校验单个下载文件时，在终端进入下载目录并运行：
 
 ```sh
-shasum -a 256 Token-Monitor-0.8.0-macos-universal.dmg
+shasum -a 256 Token-Monitor-0.8.1-macos-universal.dmg
 ```
 
 将输出与同目录 `SHA256SUMS.txt` 的 DMG 那一行比较；ZIP 同理，只需检查自己下载的文件。安装包目录的 `BUILD_INFO.md` 记录源码提交、构建版本与架构。

@@ -28,3 +28,6 @@ settings.backup.*.json
 # Local quota history archives and checkpoints.
 History/
 usage-????-??.jsonl
+
+resets-????-??.jsonl
+reset-history-index.json

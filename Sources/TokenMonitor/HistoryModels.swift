@@ -73,3 +73,39 @@ struct UsageHistoryRecord: Codable, Equatable, Identifiable {
     /// Real observations define coverage; the interval boundaries must not imply continuous sampling.
     var observedSpan: DateInterval { DateInterval(start: firstObservedAt, end: lastObservedAt) }
 }
+
+/// One independently persisted observed replenishment, including the last usage before it.
+struct HistoryResetRecord: Codable, Equatable, Identifiable {
+    let id: UUID
+    let schemaVersion: Int
+    let provider: HistoryProvider
+    let windowID: String
+    let windowName: String
+    let observedAt: Date
+    let previousObservedAt: Date
+    let previousUsedPercent: Double
+    let usedPercent: Double
+    let previousResetsAt: Date?
+    let resetsAt: Date?
+    let durationSeconds: TimeInterval?
+
+    init(id: UUID, schemaVersion: Int = 1, provider: HistoryProvider, windowID: String, windowName: String,
+         observedAt: Date, previousObservedAt: Date, previousUsedPercent: Double, usedPercent: Double,
+         previousResetsAt: Date?, resetsAt: Date?, durationSeconds: TimeInterval? = nil) {
+        self.id = id; self.schemaVersion = schemaVersion; self.provider = provider
+        self.windowID = windowID; self.windowName = windowName
+        self.observedAt = observedAt; self.previousObservedAt = previousObservedAt
+        self.previousUsedPercent = previousUsedPercent; self.usedPercent = usedPercent
+        self.previousResetsAt = previousResetsAt; self.resetsAt = resetsAt; self.durationSeconds = durationSeconds
+    }
+
+    init(provider: HistoryProvider, windowID: String, windowName: String, event: HistoryResetEvent,
+         durationSeconds: TimeInterval? = nil) {
+        self.init(id: event.id, provider: provider, windowID: windowID, windowName: windowName,
+            observedAt: event.observedAt, previousObservedAt: event.previousObservedAt,
+            previousUsedPercent: event.previousUsedPercent, usedPercent: event.usedPercent,
+            previousResetsAt: event.previousResetsAt, resetsAt: event.resetsAt, durationSeconds: durationSeconds)
+    }
+
+    var isEarlyRecovery: Bool { previousResetsAt.map { observedAt < $0 } == true }
+}

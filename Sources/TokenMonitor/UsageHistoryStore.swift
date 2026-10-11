@@ -6,6 +6,8 @@ import Combine
 @MainActor
 final class UsageHistoryStore: ObservableObject {
     @Published private(set) var records: [UsageHistoryRecord] = []
+    @Published private(set) var resetHistory: [HistoryResetRecord] = []
+    @Published private(set) var isLoadingResetHistory = false
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var interval: HistorySamplingInterval
@@ -25,6 +27,9 @@ final class UsageHistoryStore: ObservableObject {
     private var cachedAggregation: TimeInterval?
     private var cachedArchive: [UsageHistoryRecord] = []
     private var queryTask: Task<Void, Never>?
+    private var resetQueryTask: Task<Void, Never>?
+    private var resetQueryGeneration = 0
+    private var cachedResetRevision: Int?
 
     init(directory: URL? = nil,
          demo: Bool = false, demoRecords: [UsageHistoryRecord]? = nil) {
@@ -60,12 +65,17 @@ final class UsageHistoryStore: ObservableObject {
         }
         guard !observations.isEmpty else { return }
         let previousIDs = Set(recorder.pendingRecords.map(\.id))
+        let previousResetRevision = recorder.resetRevision
         do {
             try recorder.observe(provider: provider, observations: observations, capturedAt: capturedAt, now: now)
             firstRecordedAt = recorder.firstRecordedAt
             if !previousIDs.isSubset(of: Set(recorder.pendingRecords.map(\.id))) {
                 archiveRevision += 1
                 refreshStorageSize()
+            }
+            if recorder.resetRevision != previousResetRevision {
+                refreshStorageSize()
+                if cachedResetRevision != nil || isLoadingResetHistory { refreshResetHistory() }
             }
             revision += 1
             errorMessage = nil
@@ -134,6 +144,54 @@ final class UsageHistoryStore: ObservableObject {
         }
     }
 
+    func refreshResetHistory() {
+        if let fixtures = demoRecords {
+            var unique: [UUID: HistoryResetRecord] = [:]
+            for record in fixtures {
+                for event in record.resetEvents where event.kind == .usageDrop {
+                    unique[event.id] = HistoryResetRecord(provider: record.provider, windowID: record.windowID,
+                        windowName: record.windowName, event: event, durationSeconds: record.durationSeconds)
+                }
+            }
+            resetHistory = unique.values.sorted { $0.observedAt > $1.observedAt }
+            isLoadingResetHistory = false
+            return
+        }
+        let version = recorder?.resetRevision ?? 0
+        guard cachedResetRevision != version || isLoadingResetHistory else { return }
+        resetQueryGeneration += 1
+        let generation = resetQueryGeneration
+        resetQueryTask?.cancel()
+        isLoadingResetHistory = true
+        let directory = directory
+        resetQueryTask = Task { [weak self] in
+            let outcome = await Task.detached(priority: .utility) {
+                Result { try UsageHistoryRecorder.readResetHistory(directory: directory) }
+            }.value
+            guard let self, self.resetQueryGeneration == generation, !Task.isCancelled else { return }
+            self.isLoadingResetHistory = false
+            switch outcome {
+            case .success(let values):
+                self.resetHistory = values.sorted { $0.observedAt > $1.observedAt }
+                self.cachedResetRevision = version
+                self.refreshStorageSize()
+            case .failure(let error):
+                self.errorMessage = "重置历史暂不可读：" + error.localizedDescription
+            }
+        }
+    }
+
+    private func invalidateResetHistory(before cutoff: Date? = nil) {
+        let wasLoaded = cachedResetRevision != nil || isLoadingResetHistory || demoRecords != nil
+        resetQueryGeneration += 1
+        resetQueryTask?.cancel()
+        isLoadingResetHistory = false
+        cachedResetRevision = nil
+        if let cutoff { resetHistory.removeAll { $0.observedAt < cutoff } }
+        else { resetHistory = [] }
+        if wasLoaded { refreshResetHistory() }
+    }
+
     private func apply(archived: [UsageHistoryRecord], pending: [UsageHistoryRecord], range: DateInterval) {
         var byID = Dictionary(archived.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
         for record in pending where record.firstObservedAt < range.end && record.lastObservedAt >= range.start {
@@ -185,6 +243,7 @@ final class UsageHistoryStore: ObservableObject {
             cachedArchive = []
             cachedRange = nil
             records = records.filter { $0.intervalEnd > cutoff }
+            invalidateResetHistory(before: cutoff)
             errorMessage = nil
             refreshStorageSize()
             revision += 1
@@ -193,6 +252,7 @@ final class UsageHistoryStore: ObservableObject {
             cachedRange = nil
             cachedArchive = []
             refreshStorageSize()
+            invalidateResetHistory(before: cutoff)
             errorMessage = "清理未完成：" + error.localizedDescription
             revision += 1
         }
@@ -205,6 +265,7 @@ final class UsageHistoryStore: ObservableObject {
         do {
             try recorder?.clear(at: Date())
             if demoRecords != nil { demoRecords = [] }
+            invalidateResetHistory()
             archiveRevision += 1
             cachedArchive = []
             cachedRange = nil
@@ -223,6 +284,11 @@ final class UsageHistoryStore: ObservableObject {
     }
 
     func closePanel() {
+        resetQueryGeneration += 1
+        resetQueryTask?.cancel()
+        resetHistory = []
+        isLoadingResetHistory = false
+        cachedResetRevision = nil
         queryGeneration += 1
         queryTask?.cancel()
         isLoading = false
@@ -232,6 +298,7 @@ final class UsageHistoryStore: ObservableObject {
     }
 
     func stop() {
+        resetQueryTask?.cancel()
         timer?.invalidate()
         timer = nil
         queryTask?.cancel()
