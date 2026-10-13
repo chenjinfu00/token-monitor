@@ -5,6 +5,7 @@ import Combine
 @MainActor
 final class MonitorStore: ObservableObject {
     let history: UsageHistoryStore
+    let activity = ProviderActivityStore()
     @Published var codex = ProviderState(name: "Codex", message: "正在读取额度…")
     @Published var claude = ProviderState(name: "Claude · 实时", message: "正在通过官方 Claude Code 查询额度")
     @Published var compact = UserDefaults.standard.bool(forKey: "compact")
@@ -64,6 +65,7 @@ final class MonitorStore: ObservableObject {
             history.updateResetNews(resetNews, at: now)
             return
         }
+        activity.start()
         readClaude()
         refreshNow()
         codexTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
@@ -302,6 +304,7 @@ final class MonitorStore: ObservableObject {
     }
 
     func stop() {
+        activity.stop()
         history.stop()
         codexTimer?.invalidate()
         claudeTimer?.invalidate()

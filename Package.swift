@@ -6,6 +6,6 @@ let package = Package(
     platforms: [.macOS(.v13)],
     products: [.executable(name: "TokenMonitor", targets: ["TokenMonitor"])],
     targets: [
-        .executableTarget(name: "TokenMonitor")
+        .executableTarget(name: "TokenMonitor", linkerSettings: [.linkedLibrary("sqlite3")])
     ]
 )

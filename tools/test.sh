@@ -38,4 +38,16 @@ xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks
 xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
   Sources/TokenMonitor/WindowClickSequence.swift Tests/WindowClickChecks.swift -o .build/WindowClickChecks
 .build/WindowClickChecks
+xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
+  Sources/TokenMonitor/ActivityModels.swift Tests/ActivityModelChecks.swift -o .build/ActivityModelChecks
+.build/ActivityModelChecks
+xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
+  Sources/TokenMonitor/ActivityModels.swift Sources/TokenMonitor/CodexActivityProbe.swift \
+  Tests/CodexActivityChecks.swift -o .build/CodexActivityChecks
+.build/CodexActivityChecks
+xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
+  Sources/TokenMonitor/ActivityModels.swift Sources/TokenMonitor/ClaudeActivityProbe.swift \
+  Sources/TokenMonitor/ClaudeActivityHook.swift Sources/TokenMonitor/ClaudeActivityHookInstaller.swift \
+  Tests/ClaudeActivityChecks.swift -o .build/ClaudeActivityChecks
+.build/ClaudeActivityChecks
 "$token_monitor_python" -m unittest discover -s tools -p 'test_*.py'

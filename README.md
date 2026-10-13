@@ -2,13 +2,13 @@
 
 macOS 屏幕常驻小窗，显示 **Codex 与 Claude Code 的编程订阅剩余额度和重置时间**。品牌图标使用原版结形和放射形的透明矢量，没有图标底框。原生毛玻璃背景，可拖动、隐藏，或收起为屏幕边缘的 48 像素缩略窗。
 
-[下载 DMG](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.9.2/Token-Monitor-0.9.2-macos-universal.dmg) · [安装与登录](#下载与安装) · [MIT 许可证](LICENSE)
+[下载 DMG](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.10.0/Token-Monitor-0.10.0-macos-universal.dmg) · [安装与登录](#下载与安装) · [MIT 许可证](LICENSE)
 
 显示的是服务返回的额度百分比，不是精确 token 数，也不覆盖普通 ChatGPT 网页聊天的所有用量。需要 macOS 13 或更新版本。
 
 ## 下载与安装
 
-1. 下载 [DMG 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.9.2/Token-Monitor-0.9.2-macos-universal.dmg) 或 [ZIP 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.9.2/Token-Monitor-0.9.2-macos-universal.zip)。两者同时支持 Apple Silicon 与 Intel。
+1. 下载 [DMG 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.10.0/Token-Monitor-0.10.0-macos-universal.dmg) 或 [ZIP 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.10.0/Token-Monitor-0.10.0-macos-universal.zip)。两者同时支持 Apple Silicon 与 Intel。
 2. ZIP 解压后，将 **Token Monitor.app** 拖到 Finder 的“应用程序”。如果下载的是 DMG，打开后将应用拖到“应用程序”。
 3. 从“应用程序”双击 **Token Monitor**。应用会显示悬浮窗和菜单栏双行额度图标，不显示 Dock 图标。悬停在图标上可查看监控说明。
 
@@ -30,7 +30,7 @@ macOS 屏幕常驻小窗，显示 **Codex 与 Claude Code 的编程订阅剩余�
 
 仅在 ChatGPT 或 Claude 网页登录不会为本工具建立本机 CLI 会话。需要账户本身具备对应的编程工具使用权限；API 付费账户的余额不属于这里监控的订阅额度。官方工具由各服务提供，本安装包不内置它们，也不会自动替用户安装。
 
-无需在 Token Monitor 中重复登录已有的有效账户。未安装、未登录或当前官方工具不支持读取额度时，会显示等待或错误说明；点击对应的 **i** 查看详情。需要重新登录 Claude Code 时，可从菜单栏选择“登录终端 Claude Code”，在官方登录页面自行完成授权。
+无需在 Token Monitor 中重复登录已有的有效账户。未安装、未登录或当前官方工具不支持读取额度时，会显示等待或错误说明；点击对应的品牌图标查看详情。需要重新登录 Claude Code 时，可从菜单栏选择“登录终端 Claude Code”，在官方登录页面自行完成授权。
 
 ## 常见情况
 
@@ -43,7 +43,7 @@ macOS 屏幕常驻小窗，显示 **Codex 与 Claude Code 的编程订阅剩余�
 | 只显示一个服务 | 两家独立查询，先配置另一家的官方工具和订阅认证即可。 |
 | 系统提示开发者无法验证 | 参照上面的 Apple 首次打开说明；当前安装包尚未公证。 |
 
-卸载时退出应用，再从“应用程序”移走 Token Monitor。若启用过可选 Claude 状态栏采集，可先在终端运行下面的命令解除连接；默认主动查询模式不修改 Claude 设置：
+卸载时退出应用，再从“应用程序”移走 Token Monitor。若启用过可选 Claude 状态栏采集，可先在终端运行下面的命令解除连接；额度主动查询不修改 Claude 设置；任务活动采集会添加下面说明的本地回调：
 
 ```sh
 python3 "$HOME/.claude/token-monitor/bridge.py" uninstall
@@ -67,6 +67,28 @@ python3 "$HOME/.claude/token-monitor/bridge.py" uninstall
 **重置日期跟随 macOS 当前时区，并自动处理夏令时。** 主界面只显示月、日、时、分；详情中可查看时区。服务没有提供 Claude 重置时间时，日期与倒计时显示“待定”；额度百分比照常显示，未知时间不绘制时间进度。
 
 额度条与蓝色时间条都表示 **剩余百分比**。额度比剩余时间多超过 5 个百分点时为绿，少至少 15 个百分点时为红，其余为黄；未知、周期不明或已经结束时为灰。这只是均匀使用节奏的参照，不能用来推算剩余 token。
+
+## 任务活动
+
+本机任务运行时，对应的品牌图标在缩略窗、额度窗、完整图表及其历史列表中同步顺时针旋转。速度按最近 30 秒新计数的输入与输出 token 调整，命中的缓存读取不视为新增计算；不是订阅额度扣费换算。任务结束即停，等待工具或暂未收到计数时缓慢旋转。隐藏窗口、系统休眠和开启“减少动态效果”时不播放动画。
+
+Codex 只读本地 session 生命周期、累计用量和 writer 存活状态，不新建或恢复对话。Claude 使用官方 [任务 hooks](https://code.claude.com/docs/en/hooks)，需要显式启用本地采集。启用时会在 `~/.claude/settings.json` 追加本工具的轻量本地命令，保留其他字段和 hooks，并保存私有备份。原生 Claude Code CLI 与桌面 Code 的本地会话共享这些设置；旧的 npm/node CLI 不包含在本轮运行状态检测中；请在启用后重新开启 Claude 本地 Code 会话，让新回调生效。等待授权时停转，随后真实工具事件恢复活动。
+
+在安装后运行以下命令启用 Claude 任务活动采集：
+
+```sh
+"/Applications/Token Monitor.app/Contents/MacOS/TokenMonitor" --install-claude-activity-hooks
+```
+
+Claude 不提供覆盖所有取消情况的 hook；没有真实回调超过两分钟时保守停止，悬停提示“任务状态待更新”，退出的进程也会停止。长时间无事件的响应可能暂时静止，下一次事件继续更新。日志用量通常在响应完成时写入，因此速度是近期估计，无法逐 token 同步。普通网页聊天、其他设备及云端/SSH 工作不包含在本机活动监测内，额度同步也不会被误当作任务。
+
+移除应用前，可以单独解除任务采集。以下命令仅移除安装记录中仍属于本工具的命令，保留其他 hooks，并停用本机 Claude 活动读取：
+
+```sh
+"/Applications/Token Monitor.app/Contents/MacOS/TokenMonitor" --uninstall-claude-activity-hooks
+```
+
+需要重新启用时，将最后的参数改为 `--install-claude-activity-hooks`。动画使用系统矢量图层，不设逐帧界面定时器；活动监测监听新增本地数据，空闲时每 15 秒做一次本地发现，任务运行时每 5 秒核对进程存活及速率过期。不会增加额度查询频率或发送模型请求。
 
 ## 用量历史
 
@@ -116,6 +138,8 @@ python3 tools/claude_bridge.py uninstall
 
 主动查询通过官方 CLI 完成认证及刷新，不自行提取认证 token。不会发送模型请求，不上传对话或额度给公共重置网站。Claude 查询诊断只在进程内识别白名单成功/失败标志，原日志不写入磁盘或展示。
 
+任务监测仅保留生命周期标记、数字计数和进程存活信息，不保存 prompt、工具内容或对话。Codex 的活动状态只在内存中维护。Claude 私有活动快照保存在 `~/.claude/token-monitor/activity/`，会话和请求 ID 用 SHA256 标识；原始 transcript 路径和输入不会写入活动快照。设置备份是原配置完整副本，应和原配置一样保管，不随安装包分发。任务回调静默退出，不参与 Claude 的权限决定。
+
 用量历史仅保存在 `~/Library/Application Support/Token Monitor/History/`，按月保存额度数字、观测和重置信息；不会保存对话、密钥或账户标识，也不会上传。历史文件使用 `0600` 权限，可以在面板设置中查看占用和按日期清理。切换登录账户时建议先清空或暂停历史，避免在同一服务曲线上混合两个账户。
 
 状态栏采集会写入以下私有文件，使用权限 `0600` 和原子替换；不保存对话、账户标识、密钥或完整 statusline 输入：
@@ -138,12 +162,12 @@ zsh build.sh
 
 构建输出为 `dist/Token Monitor.app`，默认构建当前电脑的架构。构建 Intel + Apple Silicon 通用应用使用 `zsh build.sh --universal`；生成可下载的 ZIP、DMG 和校验文件使用 `zsh tools/package-release.sh`。下载发行包不需要 Swift 工具链。测试入口优先使用已有的 Anaconda Python，否则使用 `PATH` 中的 `python3`，不会安装依赖。测试只使用固定样例和临时目录，不访问账户、不发起模型请求，也不修改真实 Claude 设置。
 
-当前安装包保存在 [`downloads/v0.9.2/`](downloads/v0.9.2/)，同目录提供 `SHA256SUMS.txt`。另提供 GitHub Actions 发行工作流：推送版本标签（如 `v0.9.2`）后测试、构建并上传到 Releases。主分支和 Pull Request 的独立检查只测试及构建，不发布安装包。当前没有自动更新，请从仓库下载新版本后替换应用。
+当前安装包保存在 [`downloads/v0.10.0/`](downloads/v0.10.0/)，同目录提供 `SHA256SUMS.txt`。另提供 GitHub Actions 发行工作流：推送版本标签（如 `v0.10.0`）后测试、构建并上传到 Releases。主分支和 Pull Request 的独立检查只测试及构建，不发布安装包。当前没有自动更新，请从仓库下载新版本后替换应用。
 
 校验单个下载文件时，在终端进入下载目录并运行：
 
 ```sh
-shasum -a 256 Token-Monitor-0.9.2-macos-universal.dmg
+shasum -a 256 Token-Monitor-0.10.0-macos-universal.dmg
 ```
 
 将输出与同目录 `SHA256SUMS.txt` 的 DMG 那一行比较；ZIP 同理，只需检查自己下载的文件。安装包目录的 `BUILD_INFO.md` 记录源码提交、构建版本与架构。

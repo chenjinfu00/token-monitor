@@ -6,6 +6,39 @@ import SwiftUI
 struct TokenMonitorEntry {
     @MainActor
     static func main() {
+        if CommandLine.arguments.contains("--claude-activity-hook") {
+            ClaudeActivityHook.runFromStandardInput()
+            return
+        }
+        if CommandLine.arguments.contains("--uninstall-claude-activity-hooks") {
+            let failure = ClaudeActivityHookInstaller.uninstall()
+            if let failure { print(failure); exit(1) }
+            UserDefaults.standard.set(true, forKey: "claudeActivityDisabled")
+            UserDefaults.standard.set(false, forKey: "claudeActivityEnabled")
+            print("Claude 任务活动采集已解除")
+            return
+        }
+        if CommandLine.arguments.contains("--install-claude-activity-hooks") {
+            let failure = ClaudeActivityHookInstaller.installIfNeeded(bundleURL: Bundle.main.bundleURL)
+            if let failure { print(failure); exit(1) }
+            UserDefaults.standard.set(false, forKey: "claudeActivityDisabled")
+            UserDefaults.standard.set(true, forKey: "claudeActivityEnabled")
+            print("Claude 任务活动采集已启用；请重新开启本地 Code 会话")
+            return
+        }
+        if CommandLine.arguments.contains("--activity-probe") {
+            let now = Date()
+            let codex = CodexActivityProbe().read(at: now)
+            let claude = UserDefaults.standard.bool(forKey: "claudeActivityDisabled")
+                ? ProviderActivityReading() : ClaudeActivityProbe().read(at: now)
+            let summary: [String: Any] = ["source": "local-task-events",
+                "codexRunningTasks": codex.runningSessionIDs.count,
+                "claudeRunningTasks": claude.runningSessionIDs.count]
+            if let data = try? JSONSerialization.data(withJSONObject: summary, options: .sortedKeys) {
+                print(String(decoding: data, as: UTF8.self))
+            }
+            return
+        }
         if CommandLine.arguments.contains("--claude-probe") {
             do {
                 let state = try ClaudeUsageProbe.read()
@@ -86,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     private var preferredWidth: CGFloat { isDetailed ? detailedSize.width : regularWidth }
     private var preferredHeight: CGFloat { isDetailed ? detailedSize.height : naturalHeight }
 
-    private func quotaContent() -> MonitorView {
+    private func quotaContent() -> some View {
         MonitorView(store: store,
             onClose: { [weak self] in self?.hidePanels() },
             onToggleCompact: { [weak self] in self?.toggleCompact() },
@@ -96,6 +129,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             onHeightChange: { [weak self] height in
                 DispatchQueue.main.async { self?.resizeContent(to: height) }
             })
+            .environment(\.providerActivityStore, store.activity)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -304,7 +338,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                         guard let self, self.handleViewGeneration == generation else { return }
                         self.resizeHandle(to: size)
                     }
-                }),
+                }).environment(\.providerActivityStore, store.activity),
             frame: NSRect(origin: .zero, size: frame.size), cornerRadius: 9)
         handle.invalidateShadow()
     }
@@ -579,6 +613,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                 onClose: { [weak self] in self?.hidePanels() },
                 onQuit: { [weak self] in self?.quit() },
                 onRefresh: { [weak self] in self?.refresh() })
+                .environment(\.providerActivityStore, store.activity)
             panel.contentView = FloatingWindowGlassView.hosting(content, frame: NSRect(origin: .zero, size: frame.size))
         } else {
             panel.contentView = FloatingWindowGlassView.hosting(quotaContent(), frame: NSRect(origin: .zero, size: frame.size))

@@ -1,4 +1,6 @@
 import SwiftUI
+import AppKit
+import QuartzCore
 
 // The original brand outlines are documented in Design/BrandAssets/README.md.
 // Native paths preserve the transparent cutouts and stay sharp at every scale.
@@ -13,13 +15,290 @@ enum ProviderBrand {
     }
 }
 
+private struct ProviderActivityEnvironmentKey: EnvironmentKey {
+    static let defaultValue: ProviderActivityStore? = nil
+}
+
+extension EnvironmentValues {
+    var providerActivityStore: ProviderActivityStore? {
+        get { self[ProviderActivityEnvironmentKey.self] }
+        set { self[ProviderActivityEnvironmentKey.self] = newValue }
+    }
+}
+
 struct ProviderBrandIcon: View {
     let brand: ProviderBrand
+    @Environment(\.providerActivityStore) private var activityStore
 
     var body: some View {
-        ProviderBrandShape(brand: brand)
-            .fill(brand.color, style: FillStyle(eoFill: false, antialiased: true))
-            .accessibilityHidden(true)
+        Group {
+            if let activityStore {
+                ObservedProviderBrandIcon(brand: brand, activityStore: activityStore)
+            } else {
+                ProviderBrandShape(brand: brand)
+                    .fill(brand.color, style: FillStyle(eoFill: false, antialiased: true))
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct ObservedProviderBrandIcon: View {
+    let brand: ProviderBrand
+    @ObservedObject var activityStore: ProviderActivityStore
+
+    var body: some View {
+        let activity = activityStore.state(for: brand)
+        NativeProviderBrandIcon(brand: brand, rotationDuration: activity.rotationDuration)
+            .help(activity.helpText)
+    }
+}
+
+private struct NativeProviderBrandIcon: NSViewRepresentable {
+    let brand: ProviderBrand
+    let rotationDuration: TimeInterval?
+
+    func makeNSView(context: Context) -> ProviderBrandLayerView {
+        ProviderBrandLayerView(brand: brand)
+    }
+
+    func updateNSView(_ view: ProviderBrandLayerView, context: Context) {
+        view.configure(brand: brand, rotationDuration: rotationDuration)
+    }
+
+    static func dismantleNSView(_ view: ProviderBrandLayerView, coordinator: ()) {
+        view.disconnect()
+    }
+}
+
+// This clock is shared only by the two small brand layers. Changing speed preserves
+// their phase; nothing here schedules work between activity/visibility changes.
+@MainActor
+private final class ProviderBrandRotationClock {
+    struct Phase {
+        var angle: Double = 0
+        var time: CFTimeInterval = CACurrentMediaTime()
+        var duration: TimeInterval?
+
+        func angle(at time: CFTimeInterval) -> Double {
+            guard let duration else { return angle }
+            return angle - (time - self.time) / duration * 2 * .pi
+        }
+    }
+
+    static let shared = ProviderBrandRotationClock()
+    private var phases: [ProviderBrand: Phase] = [:]
+
+    func reset(for brand: ProviderBrand) {
+        phases.removeValue(forKey: brand)
+    }
+
+    func phase(for brand: ProviderBrand, duration: TimeInterval, at now: CFTimeInterval) -> Double {
+        var phase = phases[brand] ?? Phase(time: now)
+        if phase.duration != duration {
+            phase.angle = phase.angle(at: now).truncatingRemainder(dividingBy: 2 * .pi)
+            phase.time = now
+            phase.duration = duration
+            phases[brand] = phase
+        }
+        return phase.angle(at: now).truncatingRemainder(dividingBy: 2 * .pi)
+    }
+}
+
+// AppKit's unflipped layer coordinates point upward. The source paths point
+// downward, so we flip their geometry once and rotate with negative z angles.
+// Consequently the rotation is visually clockwise, including after a resize.
+@MainActor
+final class ProviderBrandLayerView: NSView {
+    private let symbolLayer = CAShapeLayer()
+    private var brand: ProviderBrand
+    private var requestedDuration: TimeInterval?
+    private var animatedDuration: TimeInterval?
+    private var rotationStartAngle: Double = 0
+    private var rotationStartTime: CFTimeInterval = 0
+    private var windowObservers: [NSObjectProtocol] = []
+    private var appearanceObserver: NSObjectProtocol?
+    private var applicationObservers: [NSObjectProtocol] = []
+    private static let animationKey = "providerActivityRotation"
+
+    init(brand: ProviderBrand) {
+        self.brand = brand
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.isGeometryFlipped = false
+        layer?.masksToBounds = false
+        symbolLayer.fillRule = .nonZero
+        symbolLayer.isGeometryFlipped = false
+        symbolLayer.masksToBounds = false
+        symbolLayer.allowsEdgeAntialiasing = true
+        layer?.addSublayer(symbolLayer)
+        setAccessibilityElement(false)
+        appearanceObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.updateAnimation() }
+        }
+        for notification in [NSApplication.didHideNotification, NSApplication.didUnhideNotification] {
+            applicationObservers.append(NotificationCenter.default.addObserver(
+                forName: notification, object: nil, queue: .main
+            ) { [weak self] _ in
+            Task { @MainActor [weak self] in self?.updateAnimation() }
+        })
+        }
+        updateColor()
+    }
+
+    required init?(coder: NSCoder) { nil }
+
+    // Buttons and the existing native drag regions retain ownership of clicks.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        symbolLayer.bounds = CGRect(origin: .zero, size: bounds.size)
+        symbolLayer.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        let upright = ProviderBrandShape(brand: brand).path(in: symbolLayer.bounds).cgPath
+        var flip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: bounds.height)
+        symbolLayer.path = upright.copy(using: &flip)
+        symbolLayer.contentsScale = window?.backingScaleFactor ?? 2
+        CATransaction.commit()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateColor()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        windowObservers.forEach(NotificationCenter.default.removeObserver)
+        windowObservers.removeAll()
+        if let window {
+            for notification in [NSWindow.didChangeOcclusionStateNotification,
+                NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification,
+                NSWindow.didExposeNotification, NSWindow.willCloseNotification,
+                NSWindow.didChangeBackingPropertiesNotification] {
+                windowObservers.append(NotificationCenter.default.addObserver(
+                    forName: notification, object: window, queue: .main
+                ) { [weak self] _ in
+                    Task { @MainActor [weak self] in
+                        self?.needsLayout = true
+                        self?.updateAnimation()
+                    }
+                })
+            }
+        }
+        updateAnimation()
+    }
+
+    override func viewDidHide() {
+        super.viewDidHide()
+        updateAnimation()
+    }
+
+    override func viewDidUnhide() {
+        super.viewDidUnhide()
+        updateAnimation()
+    }
+
+    func configure(brand: ProviderBrand, rotationDuration: TimeInterval?) {
+        if self.brand != brand {
+            stopAnimation(returnUpright: false)
+            self.brand = brand
+            needsLayout = true
+            updateColor()
+        }
+        requestedDuration = rotationDuration.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        if requestedDuration == nil { ProviderBrandRotationClock.shared.reset(for: brand) }
+        updateAnimation()
+    }
+
+    func disconnect() {
+        requestedDuration = nil
+        stopAnimation(returnUpright: false)
+        windowObservers.forEach(NotificationCenter.default.removeObserver)
+        windowObservers.removeAll()
+        applicationObservers.forEach(NotificationCenter.default.removeObserver)
+        applicationObservers.removeAll()
+        if let appearanceObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(appearanceObserver)
+            self.appearanceObserver = nil
+        }
+    }
+
+    deinit {
+        windowObservers.forEach(NotificationCenter.default.removeObserver)
+        applicationObservers.forEach(NotificationCenter.default.removeObserver)
+        if let appearanceObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(appearanceObserver)
+        }
+    }
+
+    private func updateColor() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            symbolLayer.fillColor = (brand == .codex ? NSColor.labelColor : NSColor(brand.color)).cgColor
+            CATransaction.commit()
+        }
+    }
+
+    private func updateAnimation() {
+        let visible = window?.isVisible == true && window?.isMiniaturized == false
+            && window?.occlusionState.contains(.visible) == true
+            && !isHiddenOrHasHiddenAncestor && !NSApp.isHidden
+        let animate = visible && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        guard animate, let duration = requestedDuration else {
+            stopAnimation(returnUpright: animate && requestedDuration == nil)
+            return
+        }
+        guard duration != animatedDuration || symbolLayer.animation(forKey: Self.animationKey) == nil else { return }
+        let now = CACurrentMediaTime()
+        let phase = ProviderBrandRotationClock.shared.phase(for: brand, duration: duration, at: now)
+        rotationStartAngle = phase
+        rotationStartTime = now
+        animatedDuration = duration
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        symbolLayer.removeAnimation(forKey: "providerActivityReturn")
+        symbolLayer.setValue(phase, forKeyPath: "transform.rotation.z")
+        let rotation = CABasicAnimation(keyPath: "transform.rotation.z")
+        rotation.fromValue = phase
+        rotation.toValue = phase - 2 * .pi
+        rotation.duration = duration
+        rotation.beginTime = symbolLayer.convertTime(now, from: nil)
+        rotation.repeatCount = .infinity
+        rotation.timingFunction = CAMediaTimingFunction(name: .linear)
+        symbolLayer.add(rotation, forKey: Self.animationKey)
+        CATransaction.commit()
+    }
+
+    private func stopAnimation(returnUpright: Bool) {
+        guard let duration = animatedDuration else {
+            if !returnUpright { symbolLayer.removeAnimation(forKey: "providerActivityReturn") }
+            return
+        }
+        let angle = rotationStartAngle - (CACurrentMediaTime() - rotationStartTime) / duration * 2 * .pi
+        let nearestAngle = atan2(sin(angle), cos(angle))
+        animatedDuration = nil
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        symbolLayer.removeAnimation(forKey: Self.animationKey)
+        symbolLayer.setValue(0, forKeyPath: "transform.rotation.z")
+        if returnUpright && abs(nearestAngle) > 0.001 {
+            let settle = CABasicAnimation(keyPath: "transform.rotation.z")
+            settle.fromValue = nearestAngle
+            settle.toValue = 0
+            settle.duration = 0.22
+            settle.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            symbolLayer.add(settle, forKey: "providerActivityReturn")
+        } else {
+            symbolLayer.removeAnimation(forKey: "providerActivityReturn")
+        }
+        CATransaction.commit()
     }
 }
 
