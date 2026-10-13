@@ -1,2 +1,2 @@
-9fb849c4c63db1075d0bd92859260cfe714f84d40a46633ce61499aafbe64139  Token-Monitor-0.10.3-macos-universal.zip
-8c97f7d6f5d6f9ee9df75c4bd06567d0e74420ae8f33ae9bb1339186b5f8d507  Token-Monitor-0.10.3-macos-universal.dmg
+8705fe43eed72e7974eb57835548deea51766e4f5f70fbb07c1cdcb2a0069e9c  Token-Monitor-0.10.3-macos-universal.zip
+fb7f64b58ed7ef369d25f37da109127c93538bdf21b19671b4ce999e33b012ca  Token-Monitor-0.10.3-macos-universal.dmg
