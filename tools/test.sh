@@ -31,4 +31,11 @@ xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks
   Tests/PacingGuideChecks.swift -o .build/PacingGuideChecks
 .build/PacingGuideChecks
 .build/HistoryChecks
+xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
+  Sources/TokenMonitor/HistoryModels.swift Sources/TokenMonitor/HistoryAnnualUsage.swift \
+  Tests/AnnualUsageChecks.swift -o .build/AnnualUsageChecks
+.build/AnnualUsageChecks
+xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
+  Sources/TokenMonitor/WindowClickSequence.swift Tests/WindowClickChecks.swift -o .build/WindowClickChecks
+.build/WindowClickChecks
 "$token_monitor_python" -m unittest discover -s tools -p 'test_*.py'

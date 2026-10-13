@@ -10,6 +10,8 @@ struct HistoryPanelView: View {
     @ObservedObject var history: UsageHistoryStore
     var onToggleExpanded: () -> Void = {}
     var onClose: () -> Void = {}
+    var onQuit: () -> Void = {}
+    var onRefresh: () -> Void = {}
     @HistoryViewState(initialValue: HistoryTimeScale.day) private var scale: HistoryTimeScale
     @HistoryViewState(initialValue: Date()) private var referenceDate: Date
     @HistoryViewState(initialValue: Date()) private var latestDate: Date
@@ -19,6 +21,7 @@ struct HistoryPanelView: View {
     @HistoryViewState(initialValue: [HistoryWindowOption]()) private var knownWindows: [HistoryWindowOption]
     @HistoryViewState(initialValue: [UsageHistoryRecord]()) private var displayedRecords: [UsageHistoryRecord]
     @HistoryViewState(initialValue: HistoryPlot.empty) private var cachedPlot: HistoryPlot
+    @HistoryViewState(initialValue: [HistoryAnnualUsage.Week]()) private var cachedAnnualWeeks: [HistoryAnnualUsage.Week]
     @HistoryViewState(initialValue: 0) private var renderGeneration: Int
     @HistoryViewState(initialValue: Optional<Task<Void, Never>>.none) private var renderTask: Task<Void, Never>?
     @HistoryViewState(initialValue: Optional<UUID>.none) private var selectedID: UUID?
@@ -26,6 +29,7 @@ struct HistoryPanelView: View {
     @HistoryViewState(initialValue: false) private var showingEventDetails: Bool
     @HistoryViewState(initialValue: false) private var showingEventList: Bool
     @HistoryViewState(initialValue: Optional<HistoryResetRecord>.none) private var pinnedReset: HistoryResetRecord?
+    @HistoryViewState(initialValue: Optional<Date>.none) private var selectedWeekID: Date?
     @AppStorage("history.showResetMarkers") private var showsResetMarkers = true
 
     private var range: DateInterval { scale.range(containing: referenceDate) }
@@ -36,10 +40,12 @@ struct HistoryPanelView: View {
                                     reference: history.websiteReference, at: latestDate)
     }
     private var timelineEnd: Date {
+        if scale == .year { return latestDate }
         guard let target = pacingGuides.first(where: { $0.source == .official })?.targetAt else { return latestDate }
         return target.addingTimeInterval(range.duration * 0.08)
     }
     private var presentEnd: Date {
+        if scale == .year { return latestDate }
         guard let target = pacingGuides.first(where: { $0.source == .official })?.targetAt else { return latestDate }
         return latestDate.addingTimeInterval(min(target.timeIntervalSince(latestDate) + range.duration * 0.06, range.duration * 0.35))
     }
@@ -51,6 +57,21 @@ struct HistoryPanelView: View {
     }
     private var effectiveWindowID: String { windowOptions.contains(where: { $0.id == windowID }) ? windowID : (windowOptions.first?.id ?? "") }
     private var matchingRecords: [UsageHistoryRecord] { displayedRecords }
+    private var annualWeeks: [HistoryAnnualUsage.Week] { cachedAnnualWeeks }
+    private var currentAnnualObservation: (used: Double?, observedAt: Date?) {
+        let updated = history.liveUpdatedAt[provider]
+        let window = history.liveWindows[provider]?.first { $0.id == effectiveWindowID }
+        let isFresh = updated.map { latestDate.timeIntervalSince($0) <= 300 && $0.timeIntervalSince(latestDate) <= 30 } ?? false
+        return (isFresh && window?.isExpired(at: latestDate) != true ? window?.usedPercent : nil,
+                isFresh ? updated : nil)
+    }
+    private var annualYMaximum: Double {
+        max(100, (annualWeeks.compactMap(\.cumulativeUsedPercent).max() ?? 0) * 1.12)
+    }
+    private var visibleAnnualWeek: HistoryAnnualUsage.Week? {
+        if let selectedWeekID { return annualWeeks.first { $0.id == selectedWeekID } }
+        return annualWeeks.last { $0.cumulativeUsedPercent != nil }
+    }
     private var selected: UsageHistoryRecord? {
         guard let selectedID else { return nil }
         return cachedPlot.points.first { $0.id == selectedID }?.record
@@ -116,12 +137,15 @@ struct HistoryPanelView: View {
             rememberWindows()
             if followsPresent { referenceDate = presentEnd }
             else if referenceDate > timelineEnd { referenceDate = timelineEnd }
+            if scale == .year { rebuildSeries() }
         }
+        .onChange(of: history.liveUpdatedAt) { _ in if scale == .year { rebuildSeries() } }
         .onChange(of: history.websiteReference) { _ in if followsPresent { referenceDate = presentEnd } }
         .onChange(of: history.liveNow) { now in
             latestDate = now
             if followsPresent { referenceDate = presentEnd }
             else if referenceDate > timelineEnd { referenceDate = timelineEnd }
+            if scale == .year && !followsPresent { rebuildSeries() }
         }
         .onChange(of: history.revision) { _ in
             latestDate = history.liveNow
@@ -132,11 +156,10 @@ struct HistoryPanelView: View {
 
     private var filters: some View {
         HStack(spacing: 14) {
-            HStack(spacing: 12) {
-                providerButton(.codex, brand: .codex, title: "Codex")
-                providerButton(.claude, brand: .claude, title: "Claude")
+            WindowControlBar(onClose: onQuit, onHide: onClose, onResize: onToggleExpanded,
+                             onRefresh: onRefresh, isRefreshing: history.isLoading, onDoubleClick: onToggleExpanded) {
+                EmptyView()
             }
-            Divider().frame(height: 18).opacity(0.45)
             Picker("额度窗口", selection: Binding(get: { effectiveWindowID }, set: { windowID = $0 })) {
                 if windowOptions.isEmpty { Text("暂无额度窗口").tag("") }
                 ForEach(windowOptions) { option in Text(option.title).tag(option.id) }
@@ -148,9 +171,6 @@ struct HistoryPanelView: View {
             Spacer(minLength: 12)
                 .frame(minHeight: 26)
                 .overlay { NativeWindowDragRegion(onDoubleClick: onToggleExpanded) }
-            if history.isLoading {
-                ProgressView().controlSize(.small).accessibilityLabel("正在读取历史记录")
-            }
             if let error = history.errorMessage {
                 Image(systemName: "exclamationmark.circle").foregroundStyle(Color.paceYellow)
                     .frame(width: 20, height: 26).help(error).accessibilityLabel(error)
@@ -161,30 +181,21 @@ struct HistoryPanelView: View {
             .buttonStyle(.plain).foregroundStyle(.secondary)
             .help("重置历史").accessibilityLabel("重置历史")
             .popover(isPresented: $showingEventList, arrowEdge: .bottom) { eventList }
-            Button(action: onToggleExpanded) {
-                Image(systemName: "arrow.down.right.and.arrow.up.left").font(.system(size: 14, weight: .medium)).frame(width: 24, height: 26)
+            HStack(spacing: 8) {
+                providerButton(.codex, brand: .codex, title: "Codex")
+                providerButton(.claude, brand: .claude, title: "Claude")
             }
-            .buttonStyle(.plain).foregroundStyle(.secondary)
-            .help("收起到额度页面").accessibilityLabel("收起到额度页面")
-            Button(action: onClose) {
-                Image(systemName: "xmark").font(.system(size: 14, weight: .medium)).frame(width: 24, height: 26)
-            }
-            .buttonStyle(.plain).foregroundStyle(.secondary)
-            .help("隐藏窗口").accessibilityLabel("隐藏窗口")
         }
     }
 
     private func providerButton(_ value: HistoryProvider, brand: ProviderBrand, title: String) -> some View {
         Button { provider = value } label: {
-            HStack(spacing: 6) {
-                ProviderBrandIcon(brand: brand).frame(width: 21, height: 21)
-                Text(title).font(.system(size: 14, weight: provider == value ? .semibold : .regular))
-                    .lineLimit(1).fixedSize(horizontal: true, vertical: false)
-            }
+            ProviderBrandIcon(brand: brand).frame(width: 21, height: 21).frame(width: 24, height: 26)
             .foregroundStyle(provider == value ? Color.primary : Color.secondary)
             .opacity(provider == value ? 1 : 0.65)
         }
         .buttonStyle(.plain)
+        .help(title)
         .accessibilityLabel(title + (provider == value ? "，已选择" : ""))
     }
 
@@ -206,7 +217,8 @@ struct HistoryPanelView: View {
     }
 
     @ViewBuilder private var chartArea: some View {
-        if history.firstRecordedAt == nil && history.records.isEmpty && history.resetHistory.isEmpty && pacingGuides.isEmpty {
+        if history.firstRecordedAt == nil && history.records.isEmpty && history.resetHistory.isEmpty
+            && (scale == .year ? annualWeeks.allSatisfy({ $0.cumulativeUsedPercent == nil }) : pacingGuides.isEmpty) {
             VStack(spacing: 9) {
                 Image(systemName: history.recordingEnabled ? "chart.xyaxis.line" : "pause.circle")
                     .font(.system(size: 30, weight: .light)).foregroundStyle(.secondary)
@@ -222,9 +234,10 @@ struct HistoryPanelView: View {
                     visibleDuration: range.duration, visibleEnd: referenceDate, onVisibleEndChange: { end in
                         followsPresent = abs(end.timeIntervalSince(presentEnd)) < 1
                         referenceDate = end
-                    }, content: historyChart.padding(.top, 6))
-                if matchingRecords.isEmpty && pacingGuides.isEmpty && !history.isLoading {
-                    Text("这段时间没有有效采样")
+                    }, content: selectedChart.padding(.top, 6))
+                if (scale == .year ? annualWeeks.allSatisfy({ $0.cumulativeUsedPercent == nil })
+                    : matchingRecords.isEmpty && pacingGuides.isEmpty) && !history.isLoading {
+                    Text(scale == .year ? "待记录" : "这段时间没有有效采样")
                         .font(.system(size: 13)).foregroundStyle(.secondary)
                         .allowsHitTesting(false)
                 }
@@ -232,6 +245,75 @@ struct HistoryPanelView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .frame(minHeight: 110)
         }
+    }
+
+    @ViewBuilder private var selectedChart: some View {
+        if scale == .year { annualChart } else { historyChart }
+    }
+
+    private var annualChart: some View {
+        let weeks = annualWeeks
+        return Chart {
+            ForEach(weeks) { week in
+                let lower = max(range.start, week.weekStart)
+                let upper = min(range.end, week.weekEnd)
+                let padding = upper.timeIntervalSince(lower) * 0.12
+                if let amount = week.cumulativeUsedPercent {
+                    RectangleMark(xStart: .value("周开始", lower.addingTimeInterval(padding)),
+                            xEnd: .value("周结束", upper.addingTimeInterval(-padding)),
+                            yStart: .value("额度基线", 0.0), yEnd: .value("累计已用额度", amount))
+                        .foregroundStyle(accent.opacity(week.id == selectedWeekID ? 1 : 0.76))
+                        .cornerRadius(2)
+                }
+            }
+            if showsResetMarkers {
+                ForEach(visibleEvents) { event in
+                    PointMark(x: .value("重置观测", event.observedAt), y: .value("重置标记", annualYMaximum * 0.025))
+                        .symbol(.diamond).symbolSize(event.id == selectedEventID ? 60 : 20)
+                        .foregroundStyle(eventColor(event))
+                }
+            }
+            if let event = selectedEvent {
+                RuleMark(x: .value("选中重置观测", event.observedAt))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 4])).foregroundStyle(eventColor(event))
+            }
+        }
+        .chartYScale(domain: 0...annualYMaximum)
+        .chartXScale(domain: range.start...range.end)
+        .chartLegend(.hidden)
+        .chartYAxis {
+            AxisMarks(position: .leading, values: .automatic(desiredCount: 5)) { value in
+                AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5)).foregroundStyle(Color.secondary.opacity(0.18))
+                AxisValueLabel {
+                    if let amount = value.as(Double.self) {
+                        Text(percent(amount)).font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .chartXAxis {
+            AxisMarks(values: .stride(by: .month)) { value in
+                AxisTick().foregroundStyle(Color.secondary.opacity(0.25))
+                AxisValueLabel {
+                    if let date = value.as(Date.self) {
+                        Text(scale.axisLabel(date)).font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+        .chartOverlay { proxy in
+            GeometryReader { geometry in
+                Rectangle().fill(Color.clear).contentShape(Rectangle())
+                    .onContinuousHover { phase in
+                        if case .active(let location) = phase { inspectAnnual(at: location, proxy: proxy, geometry: geometry) }
+                    }
+                    .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                        inspectAnnual(at: value.location, proxy: proxy, geometry: geometry)
+                    }.onEnded { _ in if selectedEvent != nil { showingEventDetails = true } })
+            }
+        }
+        .accessibilityLabel("\(provider.name) 每周累计额度柱状图")
+        .help("按周累计已用窗口额度，允许超过 100%；空周不补零。")
     }
 
     private var historyChart: some View {
@@ -278,7 +360,7 @@ struct HistoryPanelView: View {
             }
             if showsResetMarkers {
                 ForEach(events) { event in
-                    if scale == .fiveHours || scale == .day {
+                    if scale == .day {
                         RuleMark(x: .value("重置观测", event.observedAt))
                             .lineStyle(StrokeStyle(lineWidth: 0.8, dash: [3, 4]))
                             .foregroundStyle(eventColor(event).opacity(event.hasRecovery ? 0.42 : 0.2))
@@ -302,8 +384,6 @@ struct HistoryPanelView: View {
             }
         }
         .chartYScale(domain: 0...100)
-        .chartYAxisLabel("使用额度", position: .leading)
-        .chartXAxisLabel("时间", position: .bottom)
         .chartXScale(domain: range.start...range.end)
         .chartLegend(.hidden)
         .chartYAxis {
@@ -399,7 +479,18 @@ struct HistoryPanelView: View {
             Divider().opacity(0.4)
             if let event = selectedEvent {
                 eventInspection(event)
-            } else if let record = visibleSelection {
+            } else if scale == .year, let week = visibleAnnualWeek {
+                HStack(alignment: .top, spacing: 18) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(WidgetDateFormatter.reset(week.weekStart)) – \(WidgetDateFormatter.reset(min(week.weekEnd, latestDate)))")
+                            .font(.system(size: 12, weight: .medium)).monospacedDigit()
+                        Text("\(week.observedResetCount) 次恢复")
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    inspectionValue("累计已用", value: week.cumulativeUsedPercent.map(percent) ?? "—", color: accent)
+                }
+            } else if scale != .year, let record = visibleSelection {
                 HStack(alignment: .top, spacing: 18) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("\(WidgetDateFormatter.reset(record.intervalStart)) – \(WidgetDateFormatter.reset(record.intervalEnd))")
@@ -467,6 +558,8 @@ struct HistoryPanelView: View {
         let generation = renderGeneration
         renderTask?.cancel()
         let source = history.records
+        let resets = history.resetHistory
+        let current = currentAnnualObservation
         let selectedProvider = provider
         let selectedWindow = effectiveWindowID
         let selectedRange = range
@@ -477,11 +570,17 @@ struct HistoryPanelView: View {
                     $0.provider == selectedProvider && $0.windowID == selectedWindow
                         && $0.intervalStart < selectedRange.end && $0.intervalEnd > selectedRange.start
                 }.sorted { $0.intervalStart < $1.intervalStart }
-                return (records, HistoryPlot(records: records, range: selectedRange, scale: selectedScale))
+                let annual = selectedScale == .year
+                    ? HistoryAnnualUsage.weeks(resetHistory: resets, provider: selectedProvider,
+                                               windowID: selectedWindow, range: selectedRange,
+                                               currentUsedPercent: current.used, currentObservedAt: current.observedAt)
+                    : []
+                return (records, HistoryPlot(records: records, range: selectedRange, scale: selectedScale), annual)
             }.value
             guard !Task.isCancelled, generation == renderGeneration else { return }
             displayedRecords = output.0
             cachedPlot = output.1
+            cachedAnnualWeeks = output.2
         }
     }
 
@@ -505,6 +604,21 @@ struct HistoryPanelView: View {
         selectedEventID = nil
         guard let point = plot.points.min(by: { abs($0.date.timeIntervalSince(date)) < abs($1.date.timeIntervalSince(date)) }) else { return }
         selectedID = point.record.id
+    }
+
+    private func inspectAnnual(at location: CGPoint, proxy: ChartProxy, geometry: GeometryProxy) {
+        let frame = geometry[proxy.plotAreaFrame]
+        guard frame.contains(location), let date: Date = proxy.value(atX: location.x - frame.minX) else { return }
+        pinnedReset = nil
+        selectedID = nil
+        if showsResetMarkers && location.y >= frame.maxY - 25,
+           let event = visibleEvents.min(by: { abs($0.observedAt.timeIntervalSince(date)) < abs($1.observedAt.timeIntervalSince(date)) }),
+           let position = proxy.position(forX: event.observedAt), abs(position - (location.x - frame.minX)) <= 9 {
+            selectedEventID = event.id
+            return
+        }
+        selectedEventID = nil
+        selectedWeekID = annualWeeks.first { date >= $0.weekStart && date < $0.weekEnd }?.id
     }
 
     private func eventInspection(_ event: HistoryPlot.Event) -> some View {
@@ -586,6 +700,7 @@ struct HistoryPanelView: View {
 
     private func prepareSelectionForViewChange() {
         selectedID = nil
+        selectedWeekID = nil
         if let record = pinnedReset, record.provider == provider, record.windowID == effectiveWindowID,
            record.observedAt >= range.start, record.observedAt <= range.end {
             selectedEventID = record.id
@@ -689,11 +804,10 @@ private struct HistoryWindowOption: Identifiable, Equatable {
 }
 
 enum HistoryTimeScale: String, CaseIterable, Identifiable {
-    case fiveHours, day, week, month, year
+    case day, week, month, year
     var id: Self { self }
     var title: String {
         switch self {
-        case .fiveHours: return "5 小时"
         case .day: return "日"
         case .week: return "周"
         case .month: return "月"
@@ -702,7 +816,6 @@ enum HistoryTimeScale: String, CaseIterable, Identifiable {
     }
     func range(containing date: Date, calendar: Calendar = .autoupdatingCurrent) -> DateInterval {
         switch self {
-        case .fiveHours: return DateInterval(start: date.addingTimeInterval(-5 * 3600), end: date)
         case .day: return DateInterval(start: date.addingTimeInterval(-24 * 3600), end: date)
         case .week: return DateInterval(start: date.addingTimeInterval(-7 * 86400), end: date)
         case .month: return DateInterval(start: calendar.date(byAdding: .month, value: -1, to: date) ?? date.addingTimeInterval(-30 * 86400), end: date)
@@ -710,10 +823,8 @@ enum HistoryTimeScale: String, CaseIterable, Identifiable {
         }
     }
     func moved(_ date: Date, by count: Int, calendar: Calendar = .autoupdatingCurrent) -> Date {
-        if self == .fiveHours { return date.addingTimeInterval(Double(count) * 5 * 3600) }
         let component: Calendar.Component
         switch self {
-        case .fiveHours: component = .hour
         case .day: component = .day
         case .week: component = .weekOfYear
         case .month: component = .month
@@ -727,14 +838,13 @@ enum HistoryTimeScale: String, CaseIterable, Identifiable {
     }
     func axisLabel(_ date: Date) -> String {
         switch self {
-        case .fiveHours, .day: return format(date, "HH:mm")
+        case .day: return format(date, "HH:mm")
         case .week, .month: return format(date, "M/d")
         case .year: return format(date, "M 月")
         }
     }
     var aggregationSeconds: TimeInterval? {
         switch self {
-        case .fiveHours: return nil
         case .day: return nil
         case .week: return 3600
         case .month: return 6 * 3600
@@ -743,10 +853,10 @@ enum HistoryTimeScale: String, CaseIterable, Identifiable {
     }
     func aggregationCaption(interval: Int) -> String {
         switch self {
-        case .fiveHours, .day: return "记录区间峰值"
+        case .day: return "记录区间峰值"
         case .week: return "按小时取峰值"
         case .month: return "每 6 小时取峰值"
-        case .year: return "每日取峰值"
+        case .year: return "每周累计"
         }
     }
     private func format(_ date: Date, _ pattern: String) -> String {
@@ -788,12 +898,16 @@ struct HistoryPlot {
                   record.intervalStart < range.end, record.intervalEnd > range.start else { continue }
             if let prior {
                 let missingInterval = record.intervalStart.timeIntervalSince(prior.intervalEnd) > 1
-                let missingObservations = record.firstObservedAt.timeIntervalSince(prior.lastObservedAt) > 5 * 60
+                let expectedGap = max(5 * 60, Double(max(prior.intervalMinutes, record.intervalMinutes)) * 60 * 1.5)
+                let missingObservations = record.firstObservedAt.timeIntervalSince(prior.lastObservedAt) > expectedGap
                 let overlappingIntervals = record.intervalStart < prior.intervalEnd.addingTimeInterval(-1)
                 let reversedObservations = record.firstObservedAt < prior.lastObservedAt
-                let recoveryInPrior = prior.resetEvents.contains { $0.kind == .usageDrop }
-                let recoveryInCurrent = record.resetEvents.contains { $0.kind == .usageDrop }
-                if missingInterval || missingObservations || overlappingIntervals || reversedObservations || recoveryInPrior || recoveryInCurrent { segment += 1 }
+                let previousPeak = prior.peakObservedAt ?? prior.firstObservedAt
+                let currentPeak = record.peakObservedAt ?? record.firstObservedAt
+                let recoveryBetweenPeaks = (prior.resetEvents + record.resetEvents).contains {
+                    $0.kind == .usageDrop && $0.observedAt > previousPeak && $0.observedAt <= currentPeak
+                }
+                if missingInterval || missingObservations || overlappingIntervals || reversedObservations || recoveryBetweenPeaks { segment += 1 }
             }
             let date = record.peakObservedAt ?? record.firstObservedAt
             if date >= range.start && date <= range.end {

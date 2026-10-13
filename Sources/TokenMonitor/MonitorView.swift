@@ -11,6 +11,7 @@ struct MonitorView: View {
     var onToggleCompact: () -> Void
     var onToggleEdge: () -> Void = {}
     var onOpenHistory: () -> Void = {}
+    var onQuit: () -> Void = {}
     var onHeightChange: (CGFloat) -> Void = { _ in }
     @WidgetState(initialValue: CGFloat.zero) private var providerHeight: CGFloat
     @WidgetState(initialValue: CGFloat.zero) private var reportedHeight: CGFloat
@@ -24,6 +25,21 @@ struct MonitorView: View {
     var body: some View {
         Group {
             VStack(spacing: 8) {
+                WindowControlBar(onClose: onQuit, onHide: onClose, onResize: onToggleEdge,
+                    onRefresh: { store.refreshNow(force: true) },
+                    isRefreshing: store.codex.isLoading || store.claude.isLoading,
+                    onDoubleClick: onToggleEdge) {
+                    HStack(spacing: 8) {
+                        ProviderBrandIcon(brand: .codex)
+                            .frame(width: 22, height: 22)
+                            .frame(width: 24, height: 26)
+                            .help("Codex · " + store.codex.ageText(at: clock.now))
+                        ProviderBrandIcon(brand: .claude)
+                            .frame(width: 22, height: 22)
+                            .frame(width: 24, height: 26)
+                            .help("Claude · " + store.claude.ageText(at: clock.now))
+                    }
+                }
                 providerArea(at: clock.now)
                 ResetNewsRow(state: store.resetNews, history: store.history, now: clock.now)
             }
@@ -73,16 +89,14 @@ struct MonitorView: View {
     }
 
     private func providerCards(at now: Date) -> some View {
-        let refreshAction: () -> Void = { store.refreshNow(force: true) }
         let connectAction: (() -> Void)? = !store.claudeUsesStatusLine || store.claudeConnected ? nil : { store.connectClaude() }
         let loginAction: (() -> Void)? = store.claudeNeedsLogin ? { store.loginClaude() } : nil
         return VStack(spacing: 8) {
-            ProviderCard(state: store.codex, accent: .codexGreen, brand: .codex,
+            ProviderCard(state: store.codex, accent: .codexGreen,
                 compact: store.compact, now: now, sourceDescription: "Codex 官方服务端额度", websiteNews: store.resetNews,
-                refresh: refreshAction, openHistory: onOpenHistory,
-                toggleEdge: onToggleEdge, close: onClose, onDoubleClick: onToggleEdge)
+                onDoubleClick: onToggleEdge)
             Divider().opacity(0.28)
-            ProviderCard(state: store.claude, accent: .claudeOrange, brand: .claude,
+            ProviderCard(state: store.claude, accent: .claudeOrange,
                 compact: store.compact, now: now,
                 sourceDescription: store.claudeUsesStatusLine ? "Claude Code 状态栏回调" : "官方 Claude Code 服务端实时额度",
                 setupMessage: store.setupMessage, isConnecting: store.isConnectingClaude,
@@ -94,16 +108,11 @@ struct MonitorView: View {
 private struct ProviderCard: View {
     let state: ProviderState
     let accent: Color
-    let brand: ProviderBrand
     let compact: Bool
     let now: Date
     let sourceDescription: String
     var websiteNews: ResetNewsState? = nil
     var setupMessage: String? = nil
-    var refresh: (() -> Void)? = nil
-    var openHistory: (() -> Void)? = nil
-    var toggleEdge: (() -> Void)? = nil
-    var close: (() -> Void)? = nil
     var isConnecting = false
     var connect: (() -> Void)? = nil
     var login: (() -> Void)? = nil
@@ -146,16 +155,13 @@ private struct ProviderCard: View {
 
     private var header: some View {
         HStack(spacing: 3) {
-            ProviderBrandIcon(brand: brand)
-                .frame(width: 22, height: 22)
-                .frame(width: 26, height: 26)
             Text(state.name.hasPrefix("Claude") ? "Claude" : "Codex")
                 .font(.system(size: 15, weight: .semibold))
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
                 .frame(minWidth: 40, minHeight: 26, alignment: .leading)
                 .fixedSize(horizontal: true, vertical: false)
-                .help(state.name + "\n" + state.ageText(at: now) + "\n双击收起额度小窗 · 拖动可移动")
+                .help(state.name + "\n" + state.ageText(at: now) + "\n双击切换窗口大小 · 拖动可移动")
                 .overlay { NativeWindowDragRegion(onDoubleClick: onDoubleClick) }
             if state.name.contains("演示") {
                 Text("演示").font(.system(size: 12)).foregroundStyle(.secondary)
@@ -180,8 +186,8 @@ private struct ProviderCard: View {
             Spacer(minLength: 2)
                 .frame(minHeight: 26)
                 .overlay { NativeWindowDragRegion(onDoubleClick: onDoubleClick) }
-                .help("双击收起额度小窗 · 拖动可移动")
-            if state.isLoading && refresh == nil {
+                .help("双击切换窗口大小 · 拖动可移动")
+            if state.isLoading && state.name.hasPrefix("Claude") {
                 ProgressView().controlSize(.small)
                     .frame(width: 16, height: 16).accessibilityLabel("正在同步额度")
             }
@@ -192,14 +198,7 @@ private struct ProviderCard: View {
             if let login {
                 IconAction(symbol: "person.crop.circle", label: "登录 Claude Code", action: login)
             }
-            if let refresh {
-                IconAction(symbol: "arrow.clockwise", label: "立即刷新额度", isLoading: state.isLoading, action: refresh)
-            }
-            if let openHistory {
-                IconAction(symbol: "arrow.up.left.and.arrow.down.right", label: "展开用量与重置历史", action: openHistory)
-            }
-            if let toggleEdge { IconAction(symbol: "sidebar.right", label: "收起到屏幕边缘", action: toggleEdge) }
-            if let close { IconAction(symbol: "xmark", label: "隐藏悬浮窗", action: close) }
+
         }
         .frame(minHeight: 30)
     }

@@ -7,6 +7,7 @@ import SwiftUI
 final class FloatingQuotaPanel: NSPanel {
     var isTrackingCollapsedInteraction = false
     var allowsKeyboardFocus = false
+    var windowClicks = WindowClickSequence()
     override var canBecomeKey: Bool { allowsKeyboardFocus }
     override var canBecomeMain: Bool { false }
 }
@@ -96,20 +97,54 @@ struct NativeWindowDragRegion: NSViewRepresentable {
 }
 
 @MainActor
-private final class WindowDragHitView: NSView {
+private final class WindowDragHitView: WindowPointerInteractionView {
     var onDoubleClick: (() -> Void)?
+    override func completedDoubleClick() { onDoubleClick?() }
+}
+
+// Delay movement until a real drag. Reading both clicks ourselves also works
+// when a nonactivating panel's first click has no AppKit clickCount sequence.
+@MainActor
+private class WindowPointerInteractionView: NSView {
     override var isOpaque: Bool { false }
-    override var mouseDownCanMoveWindow: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
     override var acceptsFirstResponder: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func shouldDelayWindowOrdering(for event: NSEvent) -> Bool { true }
+    func completedDoubleClick() {}
+    func completedDrag() {}
 
     override func mouseDown(with event: NSEvent) {
-        if event.clickCount == 2, let onDoubleClick {
-            onDoubleClick()
-            return
+        guard let window, let panel = window as? FloatingQuotaPanel else { return }
+        func screenPoint(_ event: NSEvent) -> NSPoint {
+            if let cgEvent = event.cgEvent { return cgEvent.unflippedLocation }
+            return event.window == nil ? event.locationInWindow
+                : window.convertPoint(toScreen: event.locationInWindow)
         }
-        window?.performDrag(with: event)
+        let start = screenPoint(event)
+        let origin = window.frame.origin
+        panel.isTrackingCollapsedInteraction = true
+        var dragged = false
+        var released = false
+        while window.isVisible {
+            let next = NSApp.nextEvent(matching: [.leftMouseDragged, .leftMouseUp],
+                until: Date().addingTimeInterval(0.1), inMode: .eventTracking, dequeue: true)
+            if let next {
+                let current = screenPoint(next)
+                let delta = NSPoint(x: current.x - start.x, y: current.y - start.y)
+                if !dragged, hypot(delta.x, delta.y) >= 5 { dragged = true }
+                if dragged { window.setFrameOrigin(NSPoint(x: origin.x + delta.x, y: origin.y + delta.y)) }
+                if next.type == .leftMouseUp { released = true; break }
+            }
+            if next == nil && NSEvent.pressedMouseButtons & 1 == 0 { break }
+        }
+        panel.isTrackingCollapsedInteraction = false
+        if dragged { panel.windowClicks.cancel(); completedDrag() }
+        else if released, window.isVisible,
+                panel.windowClicks.completedClick(timestamp: event.timestamp, point: start,
+                    doubleClickInterval: NSEvent.doubleClickInterval) {
+            completedDoubleClick()
+        } else if !released { panel.windowClicks.cancel() }
     }
 }
 
@@ -133,14 +168,9 @@ struct NativeCollapsedWindowInteraction: NSViewRepresentable {
 }
 
 @MainActor
-private final class CollapsedWindowInteractionView: NSView {
+private final class CollapsedWindowInteractionView: WindowPointerInteractionView {
     var onClick: () -> Void
     var onDragEnded: () -> Void
-    override var isOpaque: Bool { false }
-    override var mouseDownCanMoveWindow: Bool { false }
-    override var acceptsFirstResponder: Bool { false }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func shouldDelayWindowOrdering(for event: NSEvent) -> Bool { true }
 
     init(onClick: @escaping () -> Void, onDragEnded: @escaping () -> Void) {
         self.onClick = onClick
@@ -149,39 +179,6 @@ private final class CollapsedWindowInteractionView: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    override func mouseDown(with event: NSEvent) {
-        guard let window else { return }
-        func screenPoint(_ event: NSEvent) -> NSPoint {
-            if let cgEvent = event.cgEvent {
-                // The incoming event carries a stable screen point, including
-                // synthetic events. Never substitute the physical cursor's
-                // current position or a point from a later queued event.
-                return cgEvent.unflippedLocation
-            }
-            return event.window == nil ? event.locationInWindow
-                : window.convertPoint(toScreen: event.locationInWindow)
-        }
-        let start = screenPoint(event)
-        let origin = window.frame.origin
-        let panel = window as? FloatingQuotaPanel
-        panel?.isTrackingCollapsedInteraction = true
-        var dragged = false
-        // performDrag transfers the sequence to WindowServer and may omit a
-        // mouse-up callback. Tracking here keeps click and drop unambiguous.
-        while window.isVisible {
-            let next = NSApp.nextEvent(matching: [.leftMouseDragged, .leftMouseUp],
-                until: Date().addingTimeInterval(0.1), inMode: .eventTracking, dequeue: true)
-            if let next {
-                let current = screenPoint(next)
-                let delta = NSPoint(x: current.x - start.x, y: current.y - start.y)
-                if !dragged, hypot(delta.x, delta.y) >= 5 { dragged = true }
-                if dragged { window.setFrameOrigin(NSPoint(x: origin.x + delta.x, y: origin.y + delta.y)) }
-            }
-            if next?.type == .leftMouseUp || (next == nil && NSEvent.pressedMouseButtons & 1 == 0) { break }
-        }
-        panel?.isTrackingCollapsedInteraction = false
-        if dragged { onDragEnded() }
-        else if window.isVisible, event.clickCount == 2 { onClick() }
-    }
+    override func completedDoubleClick() { onClick() }
+    override func completedDrag() { onDragEnded() }
 }

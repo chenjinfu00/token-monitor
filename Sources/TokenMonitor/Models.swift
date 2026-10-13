@@ -155,16 +155,19 @@ struct EdgeQuotaSummary {
                 if seconds < 60 { shortTime = "\(max(1, Int(seconds)))s" }
                 else if seconds < 3600 { shortTime = "\(Int(seconds / 60))m" }
                 else { shortTime = nil }
-                hoursText = shortTime ?? String(format: "%.1fh", locale: Locale(identifier: "en_US_POSIX"), hours)
-                var days = floor(hours / 24)
-                let rawRemainder = hours.truncatingRemainder(dividingBy: 24)
-                let wholeHours = rawRemainder > 10
-                var remainder = wholeHours ? rawRemainder.rounded() : (rawRemainder * 10).rounded() / 10
-                // Carry rounded 24h into the day line rather than showing
-                // an extra full day among the remaining hours.
-                if days >= 1, remainder >= 24 { days += 1; remainder = 0 }
-                daysText = days >= 1 ? String(format: "%.0fd", locale: Locale(identifier: "en_US_POSIX"), days) : nil
-                hourComponentText = shortTime ?? String(format: wholeHours ? "%.0fh" : "%.1fh", locale: Locale(identifier: "en_US_POSIX"), days >= 1 ? remainder : max(0.1, remainder))
+                if seconds >= 86400 {
+                    let roundedDays = (seconds / 86400 * 10).rounded() / 10
+                    let days = String(format: "%.1fd", locale: Locale(identifier: "en_US_POSIX"), roundedDays)
+                    hoursText = days
+                    daysText = days
+                    hourComponentText = ""
+                } else {
+                    let wholeHours = hours > 10
+                    let roundedHours = wholeHours ? hours.rounded() : (hours * 10).rounded() / 10
+                    hoursText = shortTime ?? String(format: "%.1fh", locale: Locale(identifier: "en_US_POSIX"), hours)
+                    daysText = nil
+                    hourComponentText = shortTime ?? String(format: wholeHours ? "%.0fh" : "%.1fh", locale: Locale(identifier: "en_US_POSIX"), max(0.1, roundedHours))
+                }
             } else {
                 hoursText = "—"
                 daysText = nil

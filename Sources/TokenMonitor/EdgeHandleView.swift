@@ -149,12 +149,7 @@ private struct EdgeQuotaGroup: View {
         Text(summary.percentText)
             .foregroundStyle(summary.remainingPercent == nil ? Color.secondary : WidgetAppearance.quotaColor(summary.pace))
             .fixedSize(horizontal: true, vertical: false)
-        if let days = summary.daysText {
-            Text(days)
-                .foregroundStyle(Color.timeBlue)
-                .fixedSize(horizontal: true, vertical: false)
-        }
-        Text(summary.window?.resetsAt == nil ? "待定" : summary.hourComponentText)
+        Text(summary.window?.resetsAt == nil ? "待定" : (summary.daysText ?? summary.hourComponentText))
             .foregroundStyle(summary.hourComponentText == "—" ? Color.secondary : .timeBlue)
             .fixedSize(horizontal: true, vertical: false)
     }

@@ -41,21 +41,21 @@ enum EdgeCountdownRefresh {
             threshold = seconds >= 2 ? seconds : 0
         } else if remaining < 3600 {
             threshold = floor(remaining / 60) * 60
+        } else if remaining >= 86400 {
+            let days = remaining / 86400
+            // Day summaries have one decimal place. Crossing one day switches to hours.
+            threshold = max(86400, ((days * 10).rounded() - 0.5) / 10 * 86400)
         } else {
             let hours = remaining / 3600
-            let days = floor(hours / 24)
-            let remainder = hours.truncatingRemainder(dividingBy: 24)
-            let nextRemainder: Double
-            if remainder > 10 {
+            let nextHours: Double
+            if hours > 10 {
                 // Integer-hour rounding changes at x.5, then switches to decimals at 10h.
-                nextRemainder = max(10, remainder.rounded() - 0.5)
+                nextHours = max(10, hours.rounded() - 0.5)
             } else {
-                nextRemainder = max(0, ((remainder * 10).rounded() - 0.5) / 10)
+                nextHours = max(1, ((hours * 10).rounded() - 0.5) / 10)
             }
-            var value = (days * 24 + nextRemainder) * 3600
             // A 1.0h display switches to minutes at 1h, before its next decimal step.
-            if days == 0 { value = max(3600, value) }
-            threshold = value
+            threshold = nextHours * 3600
         }
         return max(now.addingTimeInterval(epsilon), reset.addingTimeInterval(-threshold + epsilon))
     }

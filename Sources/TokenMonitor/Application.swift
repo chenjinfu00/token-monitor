@@ -90,8 +90,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         MonitorView(store: store,
             onClose: { [weak self] in self?.hidePanels() },
             onToggleCompact: { [weak self] in self?.toggleCompact() },
-            onToggleEdge: { [weak self] in self?.toggleEdge() },
-            onOpenHistory: { [weak self] in self?.toggleDetailed() },
+            onToggleEdge: { [weak self] in self?.cycleDisplaySize() },
+            onOpenHistory: { [weak self] in self?.openHistory() },
+            onQuit: { [weak self] in self?.quit() },
             onHeightChange: { [weak self] height in
                 DispatchQueue.main.async { self?.resizeContent(to: height) }
             })
@@ -171,7 +172,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         menu.addItem(withTitle: "退出 Token Monitor", action: #selector(quit), keyEquivalent: "q")
         for item in menu.items { item.target = self }
         statusItem.menu = menu
-        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(refresh), name: NSWorkspace.didWakeNotification, object: nil)
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(wokeUp), name: NSWorkspace.didWakeNotification, object: nil)
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(restoreWindowOrder), name: NSWorkspace.didActivateApplicationNotification, object: nil)
+        NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(restoreWindowOrder), name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(screensChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(instanceReopened(_:)),
             name: SingleInstanceLock.revealNotificationName, object: nil)
@@ -182,7 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         window.isOpaque = false
         window.backgroundColor = .clear
         window.hasShadow = true
-        window.level = .floating
+        window.level = .statusBar
         window.hidesOnDeactivate = false
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
     }
@@ -529,7 +532,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         panel.makeKey()
     }
 
-    private func toggleDetailed() { setDetailed(!isDetailed) }
+    private func cycleDisplaySize() {
+        finishPanelTransition()
+        if isCollapsed { expandFromEdge() }
+        else if isDetailed { toggleEdge() }
+        else { setDetailed(true) }
+    }
+
+    @objc private func restoreWindowOrder() {
+        // Reassert only a visible window: switching applications must not undo
+        // the user's Hide action or interrupt their keyboard focus.
+        for window in [panel, handle].compactMap({ $0 }) where window.isVisible {
+            window.level = .statusBar
+            window.orderFrontRegardless()
+        }
+    }
+
+    @objc private func wokeUp() { refresh(); restoreWindowOrder() }
 
     private func setDetailed(_ value: Bool, animated: Bool = true) {
         guard value != isDetailed else { return }
@@ -556,8 +575,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         let frame = constrained(NSRect(x: x, y: anchor.maxY - size.height, width: size.width, height: size.height))
         if value {
             let content = HistoryPanelView(history: store.history,
-                onToggleExpanded: { [weak self] in self?.toggleDetailed() },
-                onClose: { [weak self] in self?.hidePanels() })
+                onToggleExpanded: { [weak self] in self?.cycleDisplaySize() },
+                onClose: { [weak self] in self?.hidePanels() },
+                onQuit: { [weak self] in self?.quit() },
+                onRefresh: { [weak self] in self?.refresh() })
             panel.contentView = FloatingWindowGlassView.hosting(content, frame: NSRect(origin: .zero, size: frame.size))
         } else {
             panel.contentView = FloatingWindowGlassView.hosting(quotaContent(), frame: NSRect(origin: .zero, size: frame.size))

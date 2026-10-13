@@ -54,15 +54,26 @@ struct EdgeCountdownRefreshChecks {
         require(text(final, at: now) == "1s" && text(final, at: expired) == "—", "The last second remains 1s until true expiry")
     }
 
-    static func daysCarryAndLongSleep() {
-        let carry = provider(47.8 * 3600)
-        let next = update([carry])
-        near(next.timeIntervalSince(now), 1080.001)
-        let before = EdgeQuotaSummary(provider: carry, at: now)
-        let after = EdgeQuotaSummary(provider: carry, at: next)
-        require(before.daysText == "2d" && after.daysText == "1d" && after.hourComponentText == "23h", "Day carry changes at the existing integer rounding boundary")
+    static func decimalDaysAndLongSleep() {
+        let value = provider(5.2 * 86400)
+        let next = update([value])
+        near(next.timeIntervalSince(now), 4320.001)
+        let before = EdgeQuotaSummary(provider: value, at: now)
+        let after = EdgeQuotaSummary(provider: value, at: next)
+        require(before.daysText == "5.2d" && after.daysText == "5.1d", "Decimal days update exactly when the displayed tenth changes")
+        require(before.hourComponentText.isEmpty && after.hourComponentText.isEmpty, "Decimal days need no additional hours line")
+        let exactHalfTenth = provider(5.15 * 86400)
+        let justAfter = update([exactHalfTenth])
+        near(justAfter.timeIntervalSince(now), 0.001)
+        require(EdgeQuotaSummary(provider: exactHalfTenth, at: now).daysText == "5.2d" && EdgeQuotaSummary(provider: exactHalfTenth, at: justAfter).daysText == "5.1d", "The display and scheduler agree at exact half-tenth day boundaries")
+        let dayBoundary = provider(86400.5)
+        let crossing = update([dayBoundary])
+        near(crossing.timeIntervalSince(now), 0.501)
+        require(EdgeQuotaSummary(provider: dayBoundary, at: now).daysText == "1.0d", "One full day uses days")
+        require(EdgeQuotaSummary(provider: dayBoundary, at: crossing).daysText == nil && text(dayBoundary, at: crossing) == "24h", "Below one day switches promptly to existing hour rounding")
         let long = provider((7 * 24 + 14.25) * 3600)
-        require(update([long]).timeIntervalSince(now) > 2600, "A long countdown sleeps until a real display change")
+        near(update([long]).timeIntervalSince(now), 3780.001)
+        require(update([long]).timeIntervalSince(now) > 3600, "Decimal days sleep for more than an hour when no visible state changes")
     }
 
     static func expiryCanSelectAnotherQuota() {
@@ -105,7 +116,7 @@ struct EdgeCountdownRefreshChecks {
 
     static func main() {
         hourRoundingBoundaries(); hourToMinuteAndMinuteFloors(); minuteToSecondsAndLastSecond()
-        daysCarryAndLongSleep(); expiryCanSelectAnotherQuota(); missingAndExpiredDeadlinesStopTheClock()
+        decimalDaysAndLongSleep(); expiryCanSelectAnotherQuota(); missingAndExpiredDeadlinesStopTheClock()
         bothProvidersChooseEarliestBoundary(); paceColorsChangeWithoutAChangedNumber()
         print("8 edge-countdown rounding, units, days, expiry, idle, provider and pace checks passed")
     }

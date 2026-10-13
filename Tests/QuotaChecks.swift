@@ -140,7 +140,7 @@ final class QuotaParserTests {
         let summary = EdgeQuotaSummary(provider: ProviderState(name: "Codex", windows: [session, review, weekly]), at: now)
         XCTAssertEqual(summary.window?.id, weekly.id)
         XCTAssertEqual(summary.percentText, "30%")
-        XCTAssertEqual(summary.hoursText, "120.0h")
+        XCTAssertEqual(summary.hoursText, "5.0d")
         XCTAssertEqual(summary.pace, .behind)
         let sonnet = QuotaWindow(id: "seven_day_sonnet", name: "Sonnet", usedPercent: 100,
             resetsAt: now.addingTimeInterval(7200), durationSeconds: 604800)
@@ -200,7 +200,7 @@ final class QuotaParserTests {
         }
     }
 
-    func testVerticalSummarySplitsDaysAndRemainingHours() {
+    func testCollapsedSummaryUsesDecimalDays() {
         let now = Date(timeIntervalSince1970: 1_900_000_000)
         func summary(hours: Double) -> EdgeQuotaSummary {
             EdgeQuotaSummary(provider: ProviderState(name: "Codex", windows: [
@@ -209,22 +209,27 @@ final class QuotaParserTests {
             ]), at: now)
         }
         let weekly = summary(hours: 136.75)
-        XCTAssertEqual(weekly.daysText, "5d")
-        XCTAssertEqual(weekly.hourComponentText, "17h")
+        XCTAssertEqual(weekly.daysText, "5.7d")
+        XCTAssertEqual(weekly.hourComponentText, "")
+        XCTAssertEqual(weekly.hoursText, "5.7d")
         XCTAssertEqual(weekly.percentText, "41%")
         let wholeDays = summary(hours: 120)
-        XCTAssertEqual(wholeDays.daysText, "5d")
-        XCTAssertEqual(wholeDays.hourComponentText, "0.0h")
+        XCTAssertEqual(wholeDays.daysText, "5.0d")
+        XCTAssertEqual(wholeDays.hourComponentText, "")
+        XCTAssertEqual(summary(hours: 123).daysText, "5.1d")
+        XCTAssertEqual(summary(hours: 124.8).daysText, "5.2d")
         let nearDay = summary(hours: 23.98)
         XCTAssertNil(nearDay.daysText)
         XCTAssertEqual(nearDay.hourComponentText, "24h")
+        XCTAssertEqual(summary(hours: 24).daysText, "1.0d")
+        XCTAssertEqual(summary(hours: 24).hourComponentText, "")
         XCTAssertEqual(summary(hours: 9.94).hourComponentText, "9.9h")
         XCTAssertEqual(summary(hours: 10).hourComponentText, "10.0h")
         XCTAssertEqual(summary(hours: 10.01).hourComponentText, "10h")
         XCTAssertEqual(summary(hours: 10.6).hourComponentText, "11h")
         let roundedDay = summary(hours: 143.7)
-        XCTAssertEqual(roundedDay.daysText, "6d")
-        XCTAssertEqual(roundedDay.hourComponentText, "0h")
+        XCTAssertEqual(roundedDay.daysText, "6.0d")
+        XCTAssertEqual(roundedDay.hourComponentText, "")
     }
 
     func testObservedEarlyRecoveryAnchorsUnchangedDeadline() {
@@ -541,7 +546,7 @@ struct QuotaChecks {
         tests.testCollapsedSummaryKeepsQuotaAndResetFromSameOverallWindow()
         tests.testCollapsedSummaryMissingExpiredAndNearResetAreTruthful()
         tests.testCollapsedCountdownSwitchesAtMinuteAndHourBoundaries()
-        tests.testVerticalSummarySplitsDaysAndRemainingHours()
+        tests.testCollapsedSummaryUsesDecimalDays()
         tests.testObservedEarlyRecoveryAnchorsUnchangedDeadline()
         tests.testAvailableResetCountUnknownAndZeroAreDistinct()
         tests.testSmallUsageCorrectionDoesNotRestartTimeBar()
