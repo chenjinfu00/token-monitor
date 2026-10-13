@@ -13,6 +13,58 @@ final class ProviderActivityStore: ObservableObject {
     private var generation = 0
     private var notifications: [NSObjectProtocol] = []
     private var clockObserver: NSObjectProtocol?
+    private var localCodex = ProviderActivityState()
+    private var localClaude = ProviderActivityState()
+    private var claudeQuotaEstimator = QuotaActivityEstimator()
+    private var claudeQuotaEstimate: QuotaActivityEstimate?
+    private var lastClaudeQuotaAt: Date?
+    private var quotaExpiryTimer: Timer?
+
+    func observeClaudeQuota(_ state: ProviderState, at now: Date = Date()) {
+        guard isStarted, !isSleeping else { return }
+        guard let timestamp = state.updatedAt else { resetClaudeQuota(); return }
+        // Replayed snapshots neither stop current activity nor extend its deadline.
+        guard timestamp > (lastClaudeQuotaAt ?? .distantPast) else { return }
+        guard timestamp <= now.addingTimeInterval(2) else { resetClaudeQuota(); return }
+        lastClaudeQuotaAt = timestamp
+        claudeQuotaEstimate = claudeQuotaEstimator.observe(state, at: now)
+        quotaExpiryTimer?.invalidate()
+        quotaExpiryTimer = nil
+        if let estimate = claudeQuotaEstimate {
+            let expected = estimate.expiresAt
+            let timer = Timer(timeInterval: max(0.01, expected.timeIntervalSince(now)), repeats: false) { [weak self] _ in
+                Task { @MainActor in
+                    guard let self, self.claudeQuotaEstimate?.expiresAt == expected else { return }
+                    self.claudeQuotaEstimate = nil
+                    self.quotaExpiryTimer = nil
+                    self.publish()
+                }
+            }
+            timer.tolerance = 0.25
+            quotaExpiryTimer = timer
+            RunLoop.main.add(timer, forMode: .common)
+        }
+        publish(at: now)
+    }
+
+    func resetClaudeQuota() {
+        claudeQuotaEstimator.reset()
+        claudeQuotaEstimate = nil
+        lastClaudeQuotaAt = nil
+        quotaExpiryTimer?.invalidate()
+        quotaExpiryTimer = nil
+        publish()
+    }
+
+    private func publish(at now: Date = Date()) {
+        var nextClaude = localClaude
+        if !UserDefaults.standard.bool(forKey: "claudeActivityDisabled"),
+           let estimate = claudeQuotaEstimate, estimate.expiresAt > now {
+            nextClaude = localClaude.mergingQuotaEstimate(percentPerMinute: estimate.percentPerMinute, sampledFrom: estimate.sampledFrom)
+        }
+        if codex != localCodex { codex = localCodex }
+        if claude != nextClaude { claude = nextClaude }
+    }
 
     func state(for brand: ProviderBrand) -> ProviderActivityState {
         switch brand { case .codex: return codex; case .claude: return claude }
@@ -25,8 +77,9 @@ final class ProviderActivityStore: ObservableObject {
         clockObserver = NotificationCenter.default.addObserver(forName: .NSSystemClockDidChange, object: nil, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 guard let self, self.isStarted, !self.isSleeping else { return }
-                self.codex = ProviderActivityState()
-                self.claude = ProviderActivityState()
+                self.localCodex = ProviderActivityState()
+                self.localClaude = ProviderActivityState()
+                self.resetClaudeQuota()
                 self.resumeWorker()
             }
         }
@@ -45,8 +98,9 @@ final class ProviderActivityStore: ObservableObject {
         worker.start { [weak self] pair in
             DispatchQueue.main.async {
                 guard let self, self.isStarted, !self.isSleeping, self.generation == expected else { return }
-                if self.codex != pair.codex { self.codex = pair.codex }
-                if self.claude != pair.claude { self.claude = pair.claude }
+                self.localCodex = pair.codex
+                self.localClaude = pair.claude
+                self.publish()
             }
         }
     }
@@ -56,8 +110,9 @@ final class ProviderActivityStore: ObservableObject {
         isSleeping = true
         generation += 1
         worker.stop()
-        codex = ProviderActivityState()
-        claude = ProviderActivityState()
+        localCodex = ProviderActivityState()
+        localClaude = ProviderActivityState()
+        resetClaudeQuota()
     }
 
     private func wake() {
@@ -75,8 +130,9 @@ final class ProviderActivityStore: ObservableObject {
         notifications.removeAll()
         if let clockObserver { NotificationCenter.default.removeObserver(clockObserver) }
         clockObserver = nil
-        codex = ProviderActivityState()
-        claude = ProviderActivityState()
+        localCodex = ProviderActivityState()
+        localClaude = ProviderActivityState()
+        resetClaudeQuota()
     }
 }
 
@@ -149,6 +205,8 @@ private final class ProviderActivityWorker {
             if claudeDisabled { pair.claude.statusNote = "Claude 活动采集已停用" }
             else if !UserDefaults.standard.bool(forKey: "claudeActivityEnabled") {
                 pair.claude.statusNote = "Claude 活动采集尚未启用"
+            } else if pair.claude.lastTaskEventAt == nil {
+                pair.claude.statusNote = "等待任务信号"
             }
         }
         if pair != lastState { lastState = pair; callback(pair) }

@@ -157,6 +157,7 @@ final class MonitorStore: ObservableObject {
                 if !loggedIn {
                     claude.windows = []
                     claude.updatedAt = nil
+                    activity.resetClaudeQuota()
                     lastClaudeData = nil
                     claude.message = "Claude Code 尚未登录 · 登录后正常回复即可同步"
                 } else if claude.windows.isEmpty {
@@ -182,6 +183,7 @@ final class MonitorStore: ObservableObject {
         guard let data = try? Data(contentsOf: file) else {
             if claude.updatedAt != nil { claude.message = "本地额度快照暂不可读" }
             else { claude.message = statusLineDiagnosticMessage() }
+            activity.resetClaudeQuota()
             return
         }
         guard data != lastClaudeData else {
@@ -193,10 +195,14 @@ final class MonitorStore: ObservableObject {
                   (snapshot["schemaVersion"] as? Int) == 1,
                   QuotaParser.number(snapshot["capturedAt"]) != nil else { throw ProbeError.invalidResponse }
             claude = QuotaParser.claude(snapshot)
+            activity.observeClaudeQuota(claude)
             history.observe(provider: .claude, state: claude, at: Date())
             if claude.windows.isEmpty { claude.message = statusLineDiagnosticMessage() }
             lastClaudeData = data
-        } catch { claude.message = "本地额度快照暂不可读 · 等待下次回复" }
+        } catch {
+            claude.message = "本地额度快照暂不可读 · 等待下次回复"
+            activity.resetClaudeQuota()
+        }
     }
 
     private func statusLineDiagnosticMessage() -> String {
@@ -233,11 +239,13 @@ final class MonitorStore: ObservableObject {
             switch outcome {
             case .success(let snapshot):
                 claude = snapshot
+                activity.observeClaudeQuota(claude)
                 history.observe(provider: .claude, state: claude, at: Date())
                 claudeNeedsLogin = false
                 claudeIsThrottled = false
                 claudeRetryDelay = 300
             case .failure(let error):
+                activity.resetClaudeQuota()
                 claude.message = error.message + (claude.updatedAt == nil ? "" : " · 保留上次确认值")
                 if case .rateLimited = error {
                     claudeIsThrottled = true
@@ -251,6 +259,7 @@ final class MonitorStore: ObservableObject {
     func useClaudeStatusLine(_ enabled: Bool) {
         guard !demo, claudeUsesStatusLine != enabled else { return }
         claudeUsesStatusLine = enabled
+        activity.resetClaudeQuota()
         claudeFetchGeneration += 1
         UserDefaults.standard.set(enabled, forKey: "claudeUsesStatusLine")
         claude = ProviderState(name: enabled ? "Claude Code" : "Claude · 实时",

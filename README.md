@@ -2,13 +2,13 @@
 
 macOS 屏幕常驻小窗，显示 **Codex 与 Claude Code 的编程订阅剩余额度和重置时间**。品牌图标使用原版结形和放射形的透明矢量，没有图标底框。原生毛玻璃背景，可拖动、隐藏，或收起为屏幕边缘的 48 像素缩略窗。
 
-[下载 DMG](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.10.0/Token-Monitor-0.10.0-macos-universal.dmg) · [安装与登录](#下载与安装) · [MIT 许可证](LICENSE)
+[下载 DMG](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.10.1/Token-Monitor-0.10.1-macos-universal.dmg) · [安装与登录](#下载与安装) · [MIT 许可证](LICENSE)
 
 显示的是服务返回的额度百分比，不是精确 token 数，也不覆盖普通 ChatGPT 网页聊天的所有用量。需要 macOS 13 或更新版本。
 
 ## 下载与安装
 
-1. 下载 [DMG 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.10.0/Token-Monitor-0.10.0-macos-universal.dmg) 或 [ZIP 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.10.0/Token-Monitor-0.10.0-macos-universal.zip)。两者同时支持 Apple Silicon 与 Intel。
+1. 下载 [DMG 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.10.1/Token-Monitor-0.10.1-macos-universal.dmg) 或 [ZIP 安装包](https://github.com/chenjinfu00/token-monitor/raw/refs/heads/main/downloads/v0.10.1/Token-Monitor-0.10.1-macos-universal.zip)。两者同时支持 Apple Silicon 与 Intel。
 2. ZIP 解压后，将 **Token Monitor.app** 拖到 Finder 的“应用程序”。如果下载的是 DMG，打开后将应用拖到“应用程序”。
 3. 从“应用程序”双击 **Token Monitor**。应用会显示悬浮窗和菜单栏双行额度图标，不显示 Dock 图标。悬停在图标上可查看监控说明。
 
@@ -90,6 +90,8 @@ Claude 不提供覆盖所有取消情况的 hook；没有真实回调超过两�
 
 需要重新启用时，将最后的参数改为 `--install-claude-activity-hooks`。动画使用系统矢量图层，不设逐帧界面定时器；活动监测监听新增本地数据，空闲时每 15 秒做一次本地发现，任务运行时每 5 秒核对进程存活及速率过期。不会增加额度查询频率或发送模型请求。
 
+Claude 转速还可依据两次成功额度刷新之间的已用百分比增量估算，按真实时间间隔计算 %/分钟，取一个整体额度周期，避免把五小时和每周额度重复相加。真实任务 token 计数优先；缺少任务回调时，有新消耗才作旋转提示，下一次成功刷新无增长即停转。重置、额度回补、查询失败、数据源切换、休眠与旧数据会清除估计；75 秒没有有效新数据也会停止。真实完成或等待授权事件优先于迟到的额度。额度通常每分钟更新，因此这种推算的开始和停止最多滞后一轮刷新，也可能包含其他设备的使用；它不能证明本机任务仍在运行。第一条成功结果只建立基线，需要下一条结果才能比较，不增加服务器查询。
+
 ## 用量历史
 
 点击左上尺寸按钮，或菜单栏“用量历史”，在同一个悬浮窗进入详细图表；尺寸按钮与双击空白处沿三种尺寸循环。缩略窗不显示尺寸按钮，双击进入中等额度窗。支持连续横向滚动的时间轴，可切换 Codex / Claude 和额度周期；日、周、月、年调整同屏时间跨度与曲线密度，不按日期分页。滚轮或触控板滚动查看过去，点击“现在”返回最新位置。移动鼠标或点击数据点可查看该段的最高已用比例、末次比例和观测时间。右上角的重置历史可跨图表时间范围查看各次重置前的已用比例；独立重置日志在确认额度回补时立即保存，重启后仍可查看。只有期限变化时不会计作额度重置。图表底部用紫色菱形标记观察到的额度恢复，蓝色菱形标记重置计划变化；点击标记可查看前后使用比例、前后重置期限及两次刷新的观察时间范围。真正的重置可能发生在这个范围内，观察时刻不等同于精确发生时刻。
@@ -162,12 +164,12 @@ zsh build.sh
 
 构建输出为 `dist/Token Monitor.app`，默认构建当前电脑的架构。构建 Intel + Apple Silicon 通用应用使用 `zsh build.sh --universal`；生成可下载的 ZIP、DMG 和校验文件使用 `zsh tools/package-release.sh`。下载发行包不需要 Swift 工具链。测试入口优先使用已有的 Anaconda Python，否则使用 `PATH` 中的 `python3`，不会安装依赖。测试只使用固定样例和临时目录，不访问账户、不发起模型请求，也不修改真实 Claude 设置。
 
-当前安装包保存在 [`downloads/v0.10.0/`](downloads/v0.10.0/)，同目录提供 `SHA256SUMS.txt`。另提供 GitHub Actions 发行工作流：推送版本标签（如 `v0.10.0`）后测试、构建并上传到 Releases。主分支和 Pull Request 的独立检查只测试及构建，不发布安装包。当前没有自动更新，请从仓库下载新版本后替换应用。
+当前安装包保存在 [`downloads/v0.10.1/`](downloads/v0.10.1/)，同目录提供 `SHA256SUMS.txt`。另提供 GitHub Actions 发行工作流：推送版本标签（如 `v0.10.1`）后测试、构建并上传到 Releases。主分支和 Pull Request 的独立检查只测试及构建，不发布安装包。当前没有自动更新，请从仓库下载新版本后替换应用。
 
 校验单个下载文件时，在终端进入下载目录并运行：
 
 ```sh
-shasum -a 256 Token-Monitor-0.10.0-macos-universal.dmg
+shasum -a 256 Token-Monitor-0.10.1-macos-universal.dmg
 ```
 
 将输出与同目录 `SHA256SUMS.txt` 的 DMG 那一行比较；ZIP 同理，只需检查自己下载的文件。安装包目录的 `BUILD_INFO.md` 记录源码提交、构建版本与架构。

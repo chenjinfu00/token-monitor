@@ -42,6 +42,10 @@ xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks
   Sources/TokenMonitor/ActivityModels.swift Tests/ActivityModelChecks.swift -o .build/ActivityModelChecks
 .build/ActivityModelChecks
 xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
+  Sources/TokenMonitor/Models.swift Sources/TokenMonitor/QuotaActivityEstimator.swift \
+  Tests/QuotaActivityChecks.swift -o .build/QuotaActivityChecks
+.build/QuotaActivityChecks
+xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
   Sources/TokenMonitor/ActivityModels.swift Sources/TokenMonitor/CodexActivityProbe.swift \
   Tests/CodexActivityChecks.swift -o .build/CodexActivityChecks
 .build/CodexActivityChecks

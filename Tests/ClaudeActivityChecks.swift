@@ -111,6 +111,12 @@ import Darwin
         require(p.read(at: now).runningSessionIDs.isEmpty, "Future snapshot rejected")
         s.capturedAt = now.timeIntervalSince1970; s.owner = ClaudeActivityOwner(pid: 321, startedAt: now.timeIntervalSince1970 + 30); f.write(s)
         require(p.read(at: now).runningSessionIDs.isEmpty, "Future process birth rejected")
+        let ended = Fixture(); ended.event("UserPromptSubmit")
+        let stoppedAt = now.addingTimeInterval(10)
+        ended.event("Stop", at: stoppedAt)
+        let deadEnded = ClaudeActivityProbe(homeDirectory: ended.home, ownerIsAlive: { _ in false }).read(at: stoppedAt.addingTimeInterval(1))
+        require(deadEnded.runningSessionIDs.isEmpty && deadEnded.lastTaskEventAt == stoppedAt,
+            "A real Stop remains authoritative when the owner exits before the worker reads it")
         checks += 1
     }
     static func countersAndBaseline() {

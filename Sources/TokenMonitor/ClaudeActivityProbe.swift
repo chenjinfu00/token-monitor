@@ -43,7 +43,14 @@ final class ClaudeActivityProbe {
             seen.insert(id)
             let old = totals[id]
             totals[id] = snapshot.totalTokens
-            guard ownerIsAlive(snapshot.owner) else { continue }
+            let alive = ownerIsAlive(snapshot.owner)
+            // A terminal hook is still evidence after its process has exited.
+            // Never turn a dead process's active snapshot into a running task.
+            if alive || snapshot.phase != .active {
+                let eventAt = Date(timeIntervalSince1970: snapshot.capturedAt)
+                if eventAt > (reading.lastTaskEventAt ?? .distantPast) { reading.lastTaskEventAt = eventAt }
+            }
+            guard alive else { continue }
             if snapshot.phase == .paused { paused = true }
             if (snapshot.phase == .active && snapshot.heartbeatAt < time - ClaudeActivityFiles.ttl)
                 || snapshot.agents.values.contains(where: { $0.phase == .active && $0.at < time - ClaudeActivityFiles.ttl }) {
@@ -69,6 +76,7 @@ final class ClaudeActivityProbe {
         }
         totals = totals.filter { seen.contains($0.key) }
         if reading.runningSessionIDs.isEmpty {
+            reading.isPaused = paused
             reading.statusNote = pending ? "任务状态待更新" : (paused ? "等待授权或输入" : nil)
         }
         return reading
