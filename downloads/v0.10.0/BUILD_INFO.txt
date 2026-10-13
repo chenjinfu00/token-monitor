@@ -1,0 +1,6 @@
+Token Monitor 0.10.0 (27)
+Source commit: 6675a8048f2e31eadefb8faf320e670bd2b8df96
+Universal: arm64, x86_64
+Minimum macOS: 13.0
+Ad hoc signed; not notarized.
+No local account, configuration, activity snapshots or history included.

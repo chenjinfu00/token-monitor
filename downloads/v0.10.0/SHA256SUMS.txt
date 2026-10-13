@@ -1,0 +1,2 @@
+92dec964cd4d8f15fa54ff0ac3b79e7a6f84f838179ec801551a724e7a438bca  Token-Monitor-0.10.0-macos-universal.zip
+8761a8f4fedb9875dae4d68d449910fe69cdf55e44dc71204c45b48a0bdc0785  Token-Monitor-0.10.0-macos-universal.dmg
