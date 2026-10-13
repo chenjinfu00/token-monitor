@@ -16,6 +16,10 @@ xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks
   Tests/QuotaChecks.swift Tests/ClaudeUsageChecks.swift -o .build/QuotaChecks
 .build/QuotaChecks
 xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
+  Sources/TokenMonitor/Models.swift Sources/TokenMonitor/ClaudeUsageProbe.swift \
+  Tests/ClaudeUsageProcessChecks.swift -o .build/ClaudeUsageProcessChecks
+.build/ClaudeUsageProcessChecks
+xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
   Sources/TokenMonitor/Models.swift Sources/TokenMonitor/EdgeCountdownRefresh.swift \
   Tests/EdgeCountdownRefreshChecks.swift -o .build/EdgeCountdownRefreshChecks
 .build/EdgeCountdownRefreshChecks

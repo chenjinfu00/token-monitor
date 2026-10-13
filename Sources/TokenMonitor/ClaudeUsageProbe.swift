@@ -64,9 +64,20 @@ enum ClaudeUsageProbe {
         let deadline = Date().addingTimeInterval(timeout)
         let fd = output.fileHandleForReading.fileDescriptor
         let diagnosticFD = diagnostics.fileHandleForReading.fileDescriptor
-        var buffer = Data(), total = 0, initialized = false
+        var buffer = Data(), total = 0, initialized = false, outputClosed = false
         var diagnosticBuffer = Data(), diagnosticTotal = 0, diagnosticClosed = false
         var evidence = ClaudeUsageEvidence()
+        var pendingUsage: [String: Any]?
+
+        // stdout and stderr are separate pipes: a control payload can arrive
+        // before its HTTP evidence. Retain it until the same bounded poll loop
+        // receives confirmation; never accept cached/unconfirmed quota data.
+        func confirmedUsage() throws -> ProviderState? {
+            guard let pendingUsage else { return nil }
+            if evidence.rateLimited { throw ClaudeUsageError.rateLimited }
+            guard evidence.confirmedFresh else { return nil }
+            return try ClaudeUsageParser.parse(pendingUsage)
+        }
 
         func drainDiagnostics() throws {
             while !diagnosticClosed {
@@ -74,7 +85,15 @@ enum ClaudeUsageProbe {
                 guard poll(&descriptor, 1, 0) > 0 else { break }
                 var chunk = [UInt8](repeating: 0, count: 8192)
                 let count = Darwin.read(diagnosticFD, &chunk, chunk.count)
-                if count <= 0 { diagnosticClosed = true; break }
+                if count < 0 && errno == EINTR { continue }
+                if count <= 0 {
+                    diagnosticClosed = true
+                    if !diagnosticBuffer.isEmpty {
+                        evidence.observe(String(decoding: diagnosticBuffer, as: UTF8.self))
+                        diagnosticBuffer.removeAll(keepingCapacity: false)
+                    }
+                    break
+                }
                 diagnosticTotal += count
                 guard diagnosticTotal <= 1_048_576 else { throw ClaudeUsageError.invalidResponse }
                 diagnosticBuffer.append(contentsOf: chunk.prefix(count))
@@ -89,16 +108,23 @@ enum ClaudeUsageProbe {
             }
         }
         while Date() < deadline {
-            var descriptors = [pollfd(fd: fd, events: Int16(POLLIN), revents: 0),
+            var descriptors = [pollfd(fd: outputClosed ? -1 : fd, events: Int16(POLLIN), revents: 0),
                 pollfd(fd: diagnosticClosed ? -1 : diagnosticFD, events: Int16(POLLIN), revents: 0)]
             let ready = poll(&descriptors, nfds_t(descriptors.count), 250)
             if ready < 0 { if errno == EINTR { continue }; throw ClaudeUsageError.unavailable }
             if ready == 0 { continue }
             try drainDiagnostics()
+            if let state = try confirmedUsage() { return state }
+            if pendingUsage != nil && diagnosticClosed { throw ClaudeUsageError.unconfirmed }
             guard descriptors[0].revents != 0 else { continue }
             var chunk = [UInt8](repeating: 0, count: 8192)
             let count = Darwin.read(fd, &chunk, chunk.count)
-            if count <= 0 { throw ClaudeUsageError.unavailable }
+            if count < 0 && errno == EINTR { continue }
+            if count <= 0 {
+                outputClosed = true
+                if pendingUsage == nil { throw ClaudeUsageError.unavailable }
+                continue
+            }
             total += count
             guard total <= 1_048_576 else { throw ClaudeUsageError.invalidResponse }
             buffer.append(contentsOf: chunk.prefix(count))
@@ -120,13 +146,14 @@ enum ClaudeUsageProbe {
                     initialized = true
                     try send(id: "tm_usage", subtype: "get_usage")
                 } else if id == "tm_usage", initialized, let result = response["response"] as? [String: Any] {
+                    pendingUsage = result
                     try drainDiagnostics()
-                    if evidence.rateLimited { throw ClaudeUsageError.rateLimited }
-                    guard evidence.confirmedFresh else { throw ClaudeUsageError.unconfirmed }
-                    return try ClaudeUsageParser.parse(result)
+                    if let state = try confirmedUsage() { return state }
+                    if diagnosticClosed { throw ClaudeUsageError.unconfirmed }
                 }
             }
         }
+        if pendingUsage != nil { throw ClaudeUsageError.unconfirmed }
         throw ClaudeUsageError.timedOut
     }
 }

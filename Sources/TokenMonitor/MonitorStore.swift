@@ -39,6 +39,7 @@ final class MonitorStore: ObservableObject {
     private var claudeIsThrottled = false
     private var claudeFetchGeneration = 0
     private var lastClaudeFetchStarted = Date.distantPast
+    private var lastClaudeUsageError: ClaudeUsageError?
     private let demo: Bool
 
     static var dataDirectory: URL {
@@ -93,7 +94,8 @@ final class MonitorStore: ObservableObject {
         ["inFlight": claude.isLoading, "isRateLimited": claudeIsThrottled,
          "nextFetchAt": nextClaudeFetch.timeIntervalSince1970,
          "lastFetchStartedAt": lastClaudeFetchStarted.timeIntervalSince1970,
-         "retryDelaySeconds": claudeRetryDelay]
+         "retryDelaySeconds": claudeRetryDelay,
+         "lastError": lastClaudeUsageError.map { String(describing: $0) } as Any? ?? NSNull()]
     }
 
     func refreshNow(force: Bool = false) {
@@ -252,6 +254,7 @@ final class MonitorStore: ObservableObject {
             claude.isLoading = false
             switch outcome {
             case .success(let snapshot):
+                lastClaudeUsageError = nil
                 claude = snapshot
                 activity.observeClaudeQuota(claude)
                 history.observe(provider: .claude, state: claude, at: Date())
@@ -259,6 +262,7 @@ final class MonitorStore: ObservableObject {
                 claudeIsThrottled = false
                 claudeRetryDelay = 300
             case .failure(let error):
+                lastClaudeUsageError = error
                 activity.resetClaudeQuota()
                 claude.message = error.message + (claude.updatedAt == nil ? "" : " · 保留上次确认值")
                 if case .rateLimited = error {
