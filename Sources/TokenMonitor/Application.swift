@@ -226,6 +226,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             return ["activity": store.activity.diagnosticSnapshot(),
                     "claudeQuota": ActivityDiagnostics.quotaSnapshot(store.claude),
                     "claudeSource": store.claudeUsesStatusLine ? "statusline" : "official",
+                    "claudeRefresh": store.claudeRefreshDiagnosticSnapshot(),
                     "icons": ProviderBrandLayerView.diagnosticSnapshots()]
         }
         if CommandLine.arguments.contains("--history") { openHistory() }

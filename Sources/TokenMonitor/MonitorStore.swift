@@ -73,13 +73,27 @@ final class MonitorStore: ObservableObject {
         }
         claudeTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                guard let self, self.claudeUsesStatusLine else { return }
-                self.readClaude()
+                guard let self else { return }
+                if self.claudeUsesStatusLine {
+                    self.readClaude()
+                } else {
+                    // Check the existing minute deadline locally so timer phase
+                    // jitter cannot skip a whole refresh; the query gate is unchanged.
+                    self.refreshClaude()
+                }
             }
         }
         newsTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refreshNews() }
         }
+    }
+
+    // Read-only timings for explicit live diagnostics; never starts a query.
+    func claudeRefreshDiagnosticSnapshot() -> [String: Any] {
+        ["inFlight": claude.isLoading, "isRateLimited": claudeIsThrottled,
+         "nextFetchAt": nextClaudeFetch.timeIntervalSince1970,
+         "lastFetchStartedAt": lastClaudeFetchStarted.timeIntervalSince1970,
+         "retryDelaySeconds": claudeRetryDelay]
     }
 
     func refreshNow(force: Bool = false) {
