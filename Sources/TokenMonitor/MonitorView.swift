@@ -29,10 +29,9 @@ struct MonitorView: View {
                     onRefresh: { store.refreshNow(force: true) },
                     isRefreshing: store.codex.isLoading || store.claude.isLoading,
                     onDoubleClick: onToggleEdge) {
-                    EmptyView()
+                    ResetNewsControls(state: store.resetNews, history: store.history, now: clock.now)
                 }
                 providerArea(at: clock.now)
-                ResetNewsRow(state: store.resetNews, history: store.history, now: clock.now)
             }
             .padding(WidgetLayout.panelInset)
             .frame(width: WidgetLayout.panelWidth(compact: store.compact))
@@ -378,66 +377,55 @@ private struct QuotaBar: View {
     }
 }
 
-private struct ResetNewsRow: View {
+private struct ResetNewsControls: View {
     let state: ResetNewsState
     @ObservedObject var history: UsageHistoryStore
     let now: Date
     @WidgetState(initialValue: false) private var showingSettings: Bool
 
-    private var warning: String {
-        [state.message, state.freshnessWarning(at: now)].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
+    private var destination: URL {
+        state.sourceURL ?? URL(string: "https://codex-resets.com/zh-CN")!
     }
 
-    private var sourceHost: String { state.sourceURL?.host ?? "codex-resets.com" }
+    private var websiteTooltip: String {
+        var lines = ["打开第三方公共重置消息：" + (destination.host ?? "codex-resets.com")]
+        if let updated = state.updatedAt { lines.append("更新：" + WidgetDateFormatter.reset(updated)) }
+        if state.isLoading { lines.append("正在同步…") }
+        lines += [state.message, state.freshnessWarning(at: now)].compactMap { $0 }.filter { !$0.isEmpty }
+        return lines.joined(separator: "\n")
+    }
 
     var body: some View {
-        HStack(spacing: 6) {
-            if let url = state.sourceURL {
-                Link(destination: url) {
-                    HStack(spacing: 5) {
-                        Image(systemName: "globe").font(.system(size: 15, weight: .medium))
-                        Text(sourceHost)
-                    }
-                    .font(.system(size: 13, weight: .medium)).foregroundStyle(.secondary)
-                    .frame(minHeight: 30)
-                }
-                .buttonStyle(.plain)
-                .help("打开第三方公共重置消息：\(sourceHost)")
-                .accessibilityLabel("打开 \(sourceHost) 公共重置消息来源")
+        HStack(spacing: 4) {
+            Link(destination: destination) {
+                Image(systemName: "globe")
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 24, height: 26)
+                    .contentShape(Rectangle())
             }
-            if state.isLoading {
-                ProgressView().controlSize(.small)
-                    .frame(width: 16, height: 16).accessibilityLabel("正在更新网站消息")
-            }
-            Spacer(minLength: 3)
-            IconAction(symbol: "gearshape", label: "设置", action: { showingSettings = true })
-                .popover(isPresented: $showingSettings, arrowEdge: .top) {
-                    HistorySettingsView(history: history, onClose: { showingSettings = false })
-                }
-            InfoButton(symbol: warning.isEmpty ? "info.circle" : "exclamationmark.triangle",
-                label: warning.isEmpty ? "查看公共重置消息与更新时间" : "查看公共重置消息与警告",
-                color: warning.isEmpty ? .secondary : .orange) { newsDetails }
+            .buttonStyle(.plain)
+            .help(websiteTooltip)
+            .accessibilityLabel("打开 Codex 公共重置消息网站")
+            settingsButton
         }
-        .frame(minHeight: 30)
+        .foregroundStyle(.secondary)
     }
 
-    private var newsDetails: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("公共重置信息").font(.system(size: 16, weight: .semibold))
-            if let headline = state.headline, !headline.isEmpty {
-                Text(headline).font(.system(size: 14, weight: .medium))
-            }
-            if let detail = state.detail, !detail.isEmpty {
-                Text(detail).font(.system(size: 14)).foregroundStyle(.secondary)
-            }
-            if !warning.isEmpty {
-                Text(warning).font(.system(size: 14)).foregroundStyle(.orange)
-            }
-            if let timestamp = state.updatedAt {
-                Text("更新：\(WidgetDateFormatter.reset(timestamp))")
-                    .font(.system(size: 14)).foregroundStyle(.secondary)
-            }
+    private var settingsButton: some View {
+        Button { showingSettings = true } label: {
+            Image(systemName: "gearshape")
+                .font(.system(size: 14, weight: .medium))
+                .frame(width: 24, height: 26)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .help("设置")
+        .accessibilityLabel("设置")
+        .popover(isPresented: $showingSettings, arrowEdge: .bottom) { settingsPanel }
+    }
+
+    private var settingsPanel: some View {
+        HistorySettingsView(history: history, onClose: { showingSettings = false })
     }
 }
 
@@ -482,24 +470,6 @@ private struct GlassIconButtonStyle: ButtonStyle {
             .onHover { isHovered = $0 }
             .animation(.easeOut(duration: 0.12), value: isHovered)
             .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
-    }
-}
-
-private struct InfoButton<Details: View>: View {
-    var symbol = "info.circle"
-    let label: String
-    var color: Color = .secondary
-    @ViewBuilder let details: () -> Details
-    @WidgetState(initialValue: false) private var showsDetails: Bool
-
-    var body: some View {
-        IconAction(symbol: symbol, label: label, color: color) { showsDetails.toggle() }
-            .popover(isPresented: $showsDetails, arrowEdge: .bottom) {
-                details()
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(width: 340, alignment: .leading)
-                    .padding(16)
-            }
     }
 }
 
