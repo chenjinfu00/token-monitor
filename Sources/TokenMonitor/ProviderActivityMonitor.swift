@@ -47,13 +47,18 @@ final class ProviderActivityStore: ObservableObject {
         publish(at: now)
     }
 
-    func resetClaudeQuota() {
-        claudeQuotaEstimator.reset()
+    func suspendClaudeQuotaInference() {
+        // An unconfirmed response cannot sustain motion or replace a confirmed sample.
         claudeQuotaEstimate = nil
-        lastClaudeQuotaAt = nil
         quotaExpiryTimer?.invalidate()
         quotaExpiryTimer = nil
         publish()
+    }
+
+    func resetClaudeQuota() {
+        claudeQuotaEstimator.reset()
+        lastClaudeQuotaAt = nil
+        suspendClaudeQuotaInference()
     }
 
     private func publish(at now: Date = Date()) {
