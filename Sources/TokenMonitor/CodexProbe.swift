@@ -38,6 +38,11 @@ enum CodexProbe {
         process.standardInput = input
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
+        // A child may close stdin between handshake messages. Suppress SIGPIPE
+        // on this pipe only so a failed write becomes a recoverable query error.
+        guard fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) != -1 else {
+            throw ProbeError.serviceUnavailable
+        }
         do { try process.run() } catch { throw ProbeError.serviceUnavailable }
         defer {
             try? input.fileHandleForWriting.close()
@@ -53,7 +58,8 @@ enum CodexProbe {
         func send(_ request: [String: Any]) throws {
             var data = try JSONSerialization.data(withJSONObject: request)
             data.append(10)
-            try input.fileHandleForWriting.write(contentsOf: data)
+            do { try input.fileHandleForWriting.write(contentsOf: data) }
+            catch { throw ProbeError.serviceUnavailable }
         }
         try send(["id": 0, "method": "initialize", "params": [
             "clientInfo": ["name": "token_monitor", "title": "Token Monitor",

@@ -20,6 +20,10 @@ xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks
   Tests/ClaudeUsageProcessChecks.swift -o .build/ClaudeUsageProcessChecks
 .build/ClaudeUsageProcessChecks
 xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
+  Sources/TokenMonitor/Models.swift Sources/TokenMonitor/CodexProbe.swift \
+  Sources/TokenMonitor/ClaudeUsageProbe.swift Tests/ProbePipeSafetyChecks.swift -o .build/ProbePipeSafetyChecks
+.build/ProbePipeSafetyChecks
+xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
   Sources/TokenMonitor/Models.swift Sources/TokenMonitor/EdgeCountdownRefresh.swift \
   Tests/EdgeCountdownRefreshChecks.swift -o .build/EdgeCountdownRefreshChecks
 .build/EdgeCountdownRefreshChecks

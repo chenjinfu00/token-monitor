@@ -40,6 +40,11 @@ enum ClaudeUsageProbe {
         process.standardInput = input
         process.standardOutput = output
         process.standardError = diagnostics
+        // A child may close stdin between handshake messages. Suppress SIGPIPE
+        // on this pipe only so a failed write becomes a recoverable query error.
+        guard fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) != -1 else {
+            throw ClaudeUsageError.unavailable
+        }
         do { try process.run() } catch { throw ClaudeUsageError.unavailable }
         defer {
             try? input.fileHandleForWriting.close()
@@ -58,7 +63,8 @@ enum ClaudeUsageProbe {
                 "type": "control_request", "request_id": id, "request": ["subtype": subtype]
             ])
             data.append(10)
-            try input.fileHandleForWriting.write(contentsOf: data)
+            do { try input.fileHandleForWriting.write(contentsOf: data) }
+            catch { throw ClaudeUsageError.unavailable }
         }
         try send(id: "tm_init", subtype: "initialize")
         let deadline = Date().addingTimeInterval(timeout)
