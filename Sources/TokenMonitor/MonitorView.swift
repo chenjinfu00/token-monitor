@@ -29,16 +29,7 @@ struct MonitorView: View {
                     onRefresh: { store.refreshNow(force: true) },
                     isRefreshing: store.codex.isLoading || store.claude.isLoading,
                     onDoubleClick: onToggleEdge) {
-                    HStack(spacing: 8) {
-                        ProviderBrandIcon(brand: .codex)
-                            .frame(width: 22, height: 22)
-                            .frame(width: 24, height: 26)
-                            .help("Codex · " + store.codex.ageText(at: clock.now))
-                        ProviderBrandIcon(brand: .claude)
-                            .frame(width: 22, height: 22)
-                            .frame(width: 24, height: 26)
-                            .help("Claude · " + store.claude.ageText(at: clock.now))
-                    }
+                    EmptyView()
                 }
                 providerArea(at: clock.now)
                 ResetNewsRow(state: store.resetNews, history: store.history, now: clock.now)
@@ -117,7 +108,10 @@ private struct ProviderCard: View {
     var connect: (() -> Void)? = nil
     var login: (() -> Void)? = nil
     var onDoubleClick: (() -> Void)? = nil
+    @WidgetState(initialValue: false) private var showsProviderDetails: Bool
 
+    private var brand: ProviderBrand { state.name.hasPrefix("Claude") ? .claude : .codex }
+    private var providerName: String { state.name.hasPrefix("Claude") ? "Claude" : "Codex" }
     private var isStale: Bool { state.updatedAt.map { now.timeIntervalSince($0) > 300 } ?? false }
     private var windows: [QuotaWindow] { compact ? Array(state.windows.prefix(2)) : state.windows }
     private var status: String {
@@ -129,82 +123,106 @@ private struct ProviderCard: View {
     }
 
     var body: some View {
-        VStack(spacing: 8) {
-            header
+        VStack(spacing: 6) {
             HStack(alignment: .center, spacing: WidgetLayout.columnSpacing) {
                 VStack(spacing: WidgetLayout.rowSpacing) {
                     ForEach(windows) { window in quotaTime(window) }
                     if let reference { websiteReference(reference) }
-                }
-                .frame(width: WidgetLayout.dateColumnWidth, alignment: .leading)
-                VStack(spacing: WidgetLayout.rowSpacing) {
-                    ForEach(windows) { window in quotaWindow(window) }
-                    if let reference {
-                        RatioRow(kind: .hourglass, label: "网站预测窗口剩余", remaining: reference.remainingPercent(at: now),
-                            unavailable: "网站未提供预测时间", color: .websitePurple)
-                            .accessibilityLabel("网站预测窗口剩余 " + percentageLabel(reference.remainingPercent(at: now))
-                                + "；" + reference.description(at: now) + "；网站预测并非账户确认的重置时间")
+                    if windows.isEmpty && reference == nil {
+                        Text("待定").font(.system(size: 14, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary).frame(height: WidgetLayout.rowHeight)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
-                .frame(maxWidth: .infinity)
+                .frame(width: WidgetLayout.dateColumnWidth, alignment: .leading)
+                HStack(alignment: .top, spacing: 5) {
+                    VStack(spacing: WidgetLayout.rowSpacing) {
+                        ForEach(windows) { window in quotaWindow(window) }
+                        if let reference {
+                            RatioRow(kind: .hourglass, label: "网站预测窗口剩余", remaining: reference.remainingPercent(at: now),
+                                unavailable: "网站未提供预测时间", color: .websitePurple)
+                                .accessibilityLabel("网站预测窗口剩余 " + percentageLabel(reference.remainingPercent(at: now))
+                                    + "；" + reference.description(at: now) + "；网站预测并非账户确认的重置时间")
+                        }
+                        if windows.isEmpty {
+                            RatioRow(kind: .battery, label: providerName + " 额度剩余", remaining: nil,
+                                unavailable: status.isEmpty ? "尚未获取额度" : status, color: accent)
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    providerIdentity
+                }
+            }
+            if connect != nil || login != nil {
+                HStack(spacing: 4) {
+                    Spacer(minLength: 0)
+                        .frame(minHeight: 24)
+                        .overlay { NativeWindowDragRegion(onDoubleClick: onDoubleClick) }
+                    if let connect {
+                        IconAction(symbol: isConnecting ? "hourglass" : "link", label: "启用 Claude Code 额度采集", action: connect)
+                            .disabled(isConnecting)
+                    }
+                    if let login {
+                        IconAction(symbol: "person.crop.circle", label: "登录 Claude Code", action: login)
+                    }
+                }
             }
         }
         .padding(.vertical, 2)
         .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(providerName)
     }
 
-    private var header: some View {
-        HStack(spacing: 3) {
-            Text(state.name.hasPrefix("Claude") ? "Claude" : "Codex")
-                .font(.system(size: 15, weight: .semibold))
-                .lineLimit(1)
-                .fixedSize(horizontal: true, vertical: false)
-                .frame(minWidth: 40, minHeight: 26, alignment: .leading)
-                .fixedSize(horizontal: true, vertical: false)
-                .help(state.name + "\n" + state.ageText(at: now) + "\n双击切换窗口大小 · 拖动可移动")
-                .overlay { NativeWindowDragRegion(onDoubleClick: onDoubleClick) }
-            if state.name.contains("演示") {
-                Text("演示").font(.system(size: 12)).foregroundStyle(.secondary)
-                    .lineLimit(1).fixedSize(horizontal: true, vertical: false)
-            }
-            if let count = state.resetCreditCount {
-                HStack(spacing: 2) {
-                    Image(systemName: "arrow.counterclockwise")
-                    Text("\(count)").monospacedDigit()
-                }
-                .font(.system(size: 14, weight: .medium))
-                .fixedSize(horizontal: true, vertical: false)
-                .foregroundStyle(accent)
-                .help("官方同步的提前重置机会：\(count)次")
-                .accessibilityLabel("提前重置机会 \(count)次")
-            }
-            InfoButton(symbol: isStale ? "clock.badge.exclamationmark" : "info.circle",
-                label: "查看 \(state.name.hasPrefix("Claude") ? "Claude" : "Codex") 同步与重置时间",
-                color: isStale ? .orange : .secondary) {
-                providerDetails
-            }
-            Spacer(minLength: 2)
-                .frame(minHeight: 26)
-                .overlay { NativeWindowDragRegion(onDoubleClick: onDoubleClick) }
-                .help("双击切换窗口大小 · 拖动可移动")
-            if state.isLoading && state.name.hasPrefix("Claude") {
-                ProgressView().controlSize(.small)
-                    .frame(width: 16, height: 16).accessibilityLabel("正在同步额度")
-            }
-            if let connect {
-                IconAction(symbol: isConnecting ? "hourglass" : "link", label: "启用 Claude Code 额度采集", action: connect)
-                    .disabled(isConnecting)
-            }
-            if let login {
-                IconAction(symbol: "person.crop.circle", label: "登录 Claude Code", action: login)
-            }
-
+    private var providerIdentity: some View {
+        VStack(spacing: WidgetLayout.rowSpacing) {
+            providerBrandButton
+            if let count = state.resetCreditCount { resetCreditBadge(count) }
         }
-        .frame(minHeight: 30)
+        // Keep the metadata column stable during refresh and unknown counts.
+        .frame(width: 32, alignment: .top)
+    }
+
+    private var providerTooltip: String {
+        let age = state.name + " · " + state.ageText(at: now)
+        return status.isEmpty ? age : age + "\n" + status
+    }
+
+    private var providerBrandButton: some View {
+        Button { showsProviderDetails.toggle() } label: {
+            ProviderBrandIcon(brand: brand)
+                .frame(width: 18, height: 18)
+                .frame(width: 32, height: WidgetLayout.rowHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(providerTooltip)
+        .accessibilityLabel("查看 " + providerName + " 同步与重置详情")
+        .popover(isPresented: $showsProviderDetails, arrowEdge: .bottom) { providerPopover }
+    }
+
+    private var providerPopover: some View {
+        providerDetails
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(width: 340, alignment: .leading)
+            .padding(16)
+    }
+
+    private func resetCreditBadge(_ count: Int) -> some View {
+        HStack(spacing: 2) {
+            Image(systemName: "arrow.counterclockwise").font(.system(size: 11, weight: .medium))
+            Text("\(count)")
+                .font(.system(size: 13, weight: .medium, design: .rounded)).monospacedDigit()
+                .lineLimit(1).minimumScaleFactor(0.8)
+        }
+        .foregroundStyle(accent)
+        .frame(width: 32, height: WidgetLayout.rowHeight)
+        .help("官方同步的提前重置机会：\(count)次")
+        .accessibilityLabel("提前重置机会 \(count)次")
     }
 
     private func quotaTime(_ window: QuotaWindow) -> some View {
-        ResetTimeButton(slotLabel: shortWindow(window), title: window.name + " · 重置时间",
+        ResetTimeButton(slotLabel: shortWindow(window), title: providerName + " · " + window.name + " · 重置时间",
             timestamp: window.resetsAt, now: now, description: resetDescription(window))
     }
 
