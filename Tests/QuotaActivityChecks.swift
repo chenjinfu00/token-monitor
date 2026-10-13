@@ -146,10 +146,62 @@ struct QuotaActivityChecks {
                 "Expired delivery may serve as the next stable baseline")
         require(fresh.expiresAt == start.addingTimeInterval(315), "Future estimates retain their own capture-based expiry")
     }
+    static func subsecondResetJitterDoesNotRestartCycle() {
+        var e = QuotaActivityEstimator()
+        let firstReset = deadline.addingTimeInterval(0.295572)
+        _ = observe(&e, 31, at: 0, reset: firstReset)
+        let secondReset = deadline.addingTimeInterval(0.014015)
+        let result = observe(&e, 36, at: 60, reset: secondReset)
+        require(result?.percentPerMinute == 5,
+                "Remaining 69 to 64 with real endpoint deadline jitter is five percentage points/minute")
+        require(result?.sampledFrom == start,
+                "Subsecond deadline drift preserves the immediately preceding successful capture")
+        let fast = observe(&e, 41, at: 90, reset: deadline.addingTimeInterval(-0.350705))
+        require(fast?.percentPerMinute == 10, "Comparable higher quota rate survives jitter in either direction")
+        require(observe(&e, 41, at: 150, reset: firstReset) == nil,
+                "An unchanged quota still stops rotation despite rounding noise")
+        require(observe(&e, 42, at: 210, reset: deadline.addingTimeInterval(2)) == nil,
+                "A deadline movement beyond one second conservatively establishes a new baseline")
+        require(observe(&e, 43, at: 270, reset: deadline.addingTimeInterval(2.5))?.percentPerMinute == 1,
+                "The next stable snapshot uses the rebased deadline")
+        require(observe(&e, 3, at: 330, reset: deadline.addingTimeInterval(2.3)) == nil,
+                "Quota recovery always stops the estimate, including a hidden reset with unchanged deadline")
+        require(observe(&e, 4, at: 390, reset: deadline.addingTimeInterval(2.1))?.percentPerMinute == 1,
+                "Consumption resumes only against the post-reset baseline")
+        require(observe(&e, 5, at: 450, reset: nil) == nil,
+                "Missing reset metadata cannot borrow the previous concrete cycle")
+    }
+    static func realDeadlineNumericFixtureAndCumulativeDrift() {
+        // Numeric-only fixture: the user's remaining quota moved 69% to 64%.
+        // Reset deadlines use the recorded local snapshot values; the refresh
+        // interval is a representative 60 seconds, not a historical task replay.
+        let captured = Date(timeIntervalSince1970: 1_791_899_061.1488892)
+        let actualFirst = Date(timeIntervalSince1970: 1_791_915_000.295572)
+        let actualSecond = Date(timeIntervalSince1970: 1_791_915_000.014015)
+        var first = ProviderState(name: "Claude · 实时", updatedAt: captured)
+        first.windows = [window(31, reset: actualFirst)]
+        var second = ProviderState(name: "Claude · 实时", updatedAt: captured.addingTimeInterval(60))
+        second.windows = [window(36, reset: actualSecond)]
+        var fixture = QuotaActivityEstimator()
+        require(fixture.observe(first, at: captured) == nil, "Actual numeric fixture starts with a baseline")
+        require(fixture.observe(second, at: captured.addingTimeInterval(60))?.percentPerMinute == 5,
+                "Real fractional deadlines no longer suppress the reported quota decrement")
+        var drift = QuotaActivityEstimator()
+        _ = observe(&drift, 10, at: 0)
+        require(observe(&drift, 11, at: 60, reset: deadline.addingTimeInterval(0.4)) != nil,
+                "Small deadline rounding is allowed")
+        require(observe(&drift, 12, at: 120, reset: deadline.addingTimeInterval(0.8)) != nil,
+                "Rounding within the fixed first-cycle deadline is allowed")
+        require(observe(&drift, 13, at: 180, reset: deadline.addingTimeInterval(1.2)) == nil,
+                "Repeated subsecond shifts cannot accumulate beyond the original cycle anchor")
+        require(observe(&drift, 14, at: 240, reset: deadline.addingTimeInterval(1.3)) != nil,
+                "A changed deadline establishes a new fixed anchor")
+    }
     static func main() {
         baselineAndActualInterval(); unchangedAndRecovery(); cycleChanges(); duplicateAndOutOfOrder()
         freshnessAndDeadline(); intervalBounds(); invalidNumbers(); chooseSingleOverallWindow()
         selectionChangesAndMissingWindow(); clockAndIdentityChanges(); delayedDeliveryExpiresConservatively()
-        print("PASS 11 quota activity interval, freshness, cycle and single-window estimation groups")
+        subsecondResetJitterDoesNotRestartCycle(); realDeadlineNumericFixtureAndCumulativeDrift()
+        print("PASS 13 quota activity interval, freshness, cycle, anchored deadline jitter and single-window estimation groups")
     }
 }

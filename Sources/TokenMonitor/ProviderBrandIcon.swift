@@ -121,6 +121,53 @@ final class ProviderBrandLayerView: NSView {
     private var applicationObservers: [NSObjectProtocol] = []
     private static let animationKey = "providerActivityRotation"
 
+    private final class WeakReference {
+        weak var value: ProviderBrandLayerView?
+        init(_ value: ProviderBrandLayerView) { self.value = value }
+    }
+    private static var diagnosticViews: [ObjectIdentifier: WeakReference] = [:]
+
+    // Explicit read-only diagnostics: no timer, file output, titles or content.
+    static func diagnosticSnapshots() -> [[String: Any]] {
+        diagnosticViews = diagnosticViews.filter { $0.value.value != nil }
+        return diagnosticViews.values.compactMap { $0.value?.diagnosticSnapshot() }
+    }
+
+    private func diagnosticSnapshot() -> [String: Any] {
+        let rotation = symbolLayer.animation(forKey: Self.animationKey)
+        let windowVisible = window?.isVisible == true
+        let miniaturized = window?.isMiniaturized == true
+        let occlusionVisible = window?.occlusionState.contains(.visible) == true
+        let hiddenAncestor = isHiddenOrHasHiddenAncestor
+        let appHidden = NSApp.isHidden
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let visible = windowVisible && !miniaturized && occlusionVisible && !hiddenAncestor && !appHidden
+        let null = NSNull()
+        return [
+            "brand": brand == .codex ? "codex" : "claude",
+            "requestedDuration": requestedDuration.map { $0 as Any } ?? null,
+            "animatedDuration": animatedDuration.map { $0 as Any } ?? null,
+            "hasRotationAnimation": rotation != nil,
+            "rotationAnimationDuration": rotation.map { $0.duration as Any } ?? null,
+            "hasReturnAnimation": symbolLayer.animation(forKey: "providerActivityReturn") != nil,
+            "presentationAngleRadians": (symbolLayer.presentation()?.value(forKeyPath: "transform.rotation.z") as? NSNumber).map { $0.doubleValue as Any } ?? null,
+            "modelAngleRadians": (symbolLayer.value(forKeyPath: "transform.rotation.z") as? NSNumber).map { $0.doubleValue as Any } ?? null,
+            "windowNumber": window.map { $0.windowNumber as Any } ?? null,
+            "windowVisible": windowVisible,
+            "windowMiniaturized": miniaturized,
+            "windowOcclusionVisible": occlusionVisible,
+            "hasHiddenAncestor": hiddenAncestor,
+            "appHidden": appHidden,
+            "reduceMotion": reduceMotion,
+            "canAnimate": visible && !reduceMotion,
+            "width": Double(bounds.width),
+            "height": Double(bounds.height),
+            "visibleRectWidth": Double(visibleRect.width),
+            "visibleRectHeight": Double(visibleRect.height),
+            "layerSpeed": Double(symbolLayer.speed)
+        ]
+    }
+
     init(brand: ProviderBrand) {
         self.brand = brand
         super.init(frame: .zero)
@@ -147,6 +194,8 @@ final class ProviderBrandLayerView: NSView {
         })
         }
         updateColor()
+        Self.diagnosticViews = Self.diagnosticViews.filter { $0.value.value != nil }
+        Self.diagnosticViews[ObjectIdentifier(self)] = WeakReference(self)
     }
 
     required init?(coder: NSCoder) { nil }
@@ -217,6 +266,7 @@ final class ProviderBrandLayerView: NSView {
     }
 
     func disconnect() {
+        Self.diagnosticViews.removeValue(forKey: ObjectIdentifier(self))
         requestedDuration = nil
         stopAnimation(returnUpright: false)
         windowObservers.forEach(NotificationCenter.default.removeObserver)

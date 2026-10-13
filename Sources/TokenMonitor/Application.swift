@@ -26,6 +26,14 @@ struct TokenMonitorEntry {
             print("Claude 任务活动采集已启用；请重新开启本地 Code 会话")
             return
         }
+        if CommandLine.arguments.contains("--activity-status") {
+            guard let snapshot = ActivityDiagnostics.readRunningApp() else {
+                print("正在运行的 Token Monitor 未响应活动诊断。")
+                exit(1)
+            }
+            print(snapshot)
+            return
+        }
         if CommandLine.arguments.contains("--activity-probe") {
             let now = Date()
             let codex = CodexActivityProbe().read(at: now)
@@ -95,6 +103,7 @@ if CommandLine.arguments.contains("--probe") {
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
+    private var activityDiagnosticObserver: NSObjectProtocol?
     private var panel: NSPanel!
     private var handle: NSPanel!
     private var store: MonitorStore!
@@ -212,6 +221,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         NotificationCenter.default.addObserver(self, selector: #selector(screensChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(instanceReopened(_:)),
             name: SingleInstanceLock.revealNotificationName, object: nil)
+        activityDiagnosticObserver = ActivityDiagnostics.installResponseHandler { [weak self] in
+            guard let self, let store = self.store else { return [:] }
+            return ["activity": store.activity.diagnosticSnapshot(),
+                    "claudeQuota": ActivityDiagnostics.quotaSnapshot(store.claude),
+                    "claudeSource": store.claudeUsesStatusLine ? "statusline" : "official",
+                    "icons": ProviderBrandLayerView.diagnosticSnapshots()]
+        }
         if CommandLine.arguments.contains("--history") { openHistory() }
     }
 
@@ -651,6 +667,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         store?.stop()
         NotificationCenter.default.removeObserver(self)
         DistributedNotificationCenter.default().removeObserver(self)
+        if let activityDiagnosticObserver { DistributedNotificationCenter.default().removeObserver(activityDiagnosticObserver) }
+        activityDiagnosticObserver = nil
         NSWorkspace.shared.notificationCenter.removeObserver(self)
     }
 }

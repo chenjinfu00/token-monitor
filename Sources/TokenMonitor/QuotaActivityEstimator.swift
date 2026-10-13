@@ -13,6 +13,7 @@ struct QuotaActivityEstimator {
         let provider: String
         let window: QuotaWindow
         let at: Date
+        let resetAnchor: Date?
     }
     private var previous: Sample?
     private var acceptedAt: Date?
@@ -36,13 +37,17 @@ struct QuotaActivityEstimator {
             previous = nil
             return nil
         }
-        let sample = Sample(provider: state.name, window: window, at: capturedAt)
         let old = previous
+        let sameCycle = old.map { old in
+            old.provider == state.name && old.window.id == window.id &&
+                Self.sameResetDeadline(old.resetAnchor, window.resetsAt) &&
+                old.window.cycleStartedAt == window.cycleStartedAt &&
+                old.window.durationSeconds == window.durationSeconds
+        } ?? false
+        let sample = Sample(provider: state.name, window: window, at: capturedAt,
+                            resetAnchor: sameCycle ? old?.resetAnchor : window.resetsAt)
         previous = sample
-        guard let old, old.provider == sample.provider, old.window.id == window.id,
-              old.window.resetsAt == window.resetsAt,
-              old.window.cycleStartedAt == window.cycleStartedAt,
-              old.window.durationSeconds == window.durationSeconds,
+        guard sameCycle, let old,
               let oldUsed = old.window.usedPercent, let used = window.usedPercent else { return nil }
         let seconds = capturedAt.timeIntervalSince(old.at)
         let delta = used - oldUsed
@@ -53,6 +58,19 @@ struct QuotaActivityEstimator {
         let expiresAt = min(now.addingTimeInterval(75), capturedAt.addingTimeInterval(75))
         guard rate.isFinite, rate > 0, expiresAt > now else { return nil }
         return QuotaActivityEstimate(percentPerMinute: rate, sampledFrom: old.at, expiresAt: expiresAt)
+    }
+
+    private static func sameResetDeadline(_ old: Date?, _ new: Date?) -> Bool {
+        switch (old, new) {
+        case (nil, nil): return true
+        case let (old?, new?):
+            // Claude's quota endpoint reconstructs the same reset deadline with
+            // subsecond jitter on each query. Preserve its full display precision,
+            // but do not mistake that rounding noise for a new quota cycle.
+            // Compare against a fixed cycle anchor so drift cannot accumulate.
+            return abs(old.timeIntervalSince(new)) <= 1
+        default: return false
+        }
     }
 
     private static func selectedWindow(in state: ProviderState, at now: Date) -> QuotaWindow? {

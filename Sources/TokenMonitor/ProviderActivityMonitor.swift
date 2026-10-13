@@ -66,6 +66,27 @@ final class ProviderActivityStore: ObservableObject {
         if claude != nextClaude { claude = nextClaude }
     }
 
+    func diagnosticSnapshot() -> [String: Any] {
+        func stateSnapshot(_ state: ProviderActivityState) -> [String: Any] {
+            ["runningTaskCount": state.runningTaskCount,
+             "tokensPerSecond": state.tokensPerSecond as Any? ?? NSNull(),
+             "quotaPercentPerMinute": state.quotaPercentPerMinute as Any? ?? NSNull(),
+             "rotationDuration": state.rotationDuration as Any? ?? NSNull(),
+             "isInferredFromQuota": state.isInferredFromQuota,
+             "isPaused": state.isPaused,
+             "lastTaskEventAt": state.lastTaskEventAt.map { $0.timeIntervalSince1970 } as Any? ?? NSNull()]
+        }
+        let estimate: Any = claudeQuotaEstimate.map {
+            ["percentPerMinute": $0.percentPerMinute, "sampledFrom": $0.sampledFrom.timeIntervalSince1970,
+             "expiresAt": $0.expiresAt.timeIntervalSince1970] as [String: Any]
+        } ?? NSNull()
+        return ["started": isStarted, "sleeping": isSleeping,
+                "claudeActivityDisabled": UserDefaults.standard.bool(forKey: "claudeActivityDisabled"),
+                "codex": stateSnapshot(codex), "claude": stateSnapshot(claude),
+                "claudeLocal": stateSnapshot(localClaude), "claudeQuotaEstimate": estimate,
+                "lastClaudeQuotaAt": lastClaudeQuotaAt.map { $0.timeIntervalSince1970 } as Any? ?? NSNull()]
+    }
+
     func state(for brand: ProviderBrand) -> ProviderActivityState {
         switch brand { case .codex: return codex; case .claude: return claude }
     }
