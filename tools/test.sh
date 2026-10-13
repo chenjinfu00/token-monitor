@@ -50,6 +50,12 @@ xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks
   Tests/QuotaActivityChecks.swift -o .build/QuotaActivityChecks
 .build/QuotaActivityChecks
 xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
+  Sources/TokenMonitor/Models.swift Sources/TokenMonitor/ActivityModels.swift \
+  Sources/TokenMonitor/QuotaActivityEstimator.swift Sources/TokenMonitor/ProviderActivityMonitor.swift \
+  Sources/TokenMonitor/ClaudeUsageProbe.swift Sources/TokenMonitor/ClaudeAuthProbe.swift \
+  Tests/QuotaActivityStoreChecks.swift -o .build/QuotaActivityStoreChecks
+.build/QuotaActivityStoreChecks
+xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
   Sources/TokenMonitor/ActivityModels.swift Sources/TokenMonitor/CodexActivityProbe.swift \
   Tests/CodexActivityChecks.swift -o .build/CodexActivityChecks
 .build/CodexActivityChecks

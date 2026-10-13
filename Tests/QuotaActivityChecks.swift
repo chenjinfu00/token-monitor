@@ -29,13 +29,13 @@ struct QuotaActivityChecks {
         require(observe(&e, 10, at: 0) == nil, "First successful result establishes a baseline")
         let slow = observe(&e, 11, at: 60)!
         require(slow.percentPerMinute == 1 && slow.sampledFrom == start, "Use actual capture interval and keep its start")
-        require(slow.expiresAt == start.addingTimeInterval(135), "Fresh estimate expires 75 seconds after observation")
+        require(slow.expiresAt == start.addingTimeInterval(360), "Confirmed consumption expires five minutes after its actual capture")
         let fast = observe(&e, 12, at: 90)!
         require(fast.percentPerMinute == 2 && fast.sampledFrom == start.addingTimeInterval(60), "Shorter interval reflects faster percentage consumption")
     }
     static func unchangedAndRecovery() {
         var e = QuotaActivityEstimator(); _ = observe(&e, 30, at: 0)
-        require(observe(&e, 30, at: 60) == nil, "No growth stops the estimate")
+        require(observe(&e, 30, at: 60) == nil, "Without any observed growth there is no activity to retain")
         require(observe(&e, 3, at: 120) == nil, "Percentage recovery cannot be consumption")
         let next = observe(&e, 4, at: 180)!
         require(next.percentPerMinute == 1 && next.sampledFrom == start.addingTimeInterval(120), "Recovery becomes a new baseline")
@@ -55,27 +55,29 @@ struct QuotaActivityChecks {
         var e = QuotaActivityEstimator(); _ = observe(&e, 10, at: 0)
         require(e.observe(state(90, at: 0), at: start.addingTimeInterval(20)) == nil, "Duplicate timestamps cannot invent speed")
         require(e.observe(state(90, at: -1), at: start.addingTimeInterval(30)) == nil, "Out-of-order data is ignored")
-        require(e.observe(state(80, at: 61), at: start.addingTimeInterval(40)) == nil, "Future captures are ignored")
-        require(observe(&e, 11, at: 60)?.percentPerMinute == 1, "Rejected deliveries do not replace the legitimate baseline")
+        require(observe(&e, 11, at: 60)?.percentPerMinute == 1, "Replay deliveries do not replace the legitimate baseline")
         var loading = state(40, at: 120); loading.isLoading = true
-        require(e.observe(loading, at: start.addingTimeInterval(120)) == nil, "A loading snapshot is not a successful response")
+        require(e.observe(loading, at: start.addingTimeInterval(120))?.expiresAt == start.addingTimeInterval(360), "Loading preserves only the existing confirmed lease without renewal")
+        require(e.observe(state(80, at: 181), at: start.addingTimeInterval(180)) == nil, "Future capture timestamps invalidate comparison and activity")
+        require(observe(&e, 12, at: 240) == nil, "First result after an invalid capture establishes a new baseline")
     }
     static func freshnessAndDeadline() {
         var e = QuotaActivityEstimator()
         require(e.observe(state(10, at: 0), at: start.addingTimeInterval(301)) == nil, "Over five-minute old data cannot establish a baseline")
-        require(e.observe(state(10, at: 60), at: start.addingTimeInterval(360)) == nil, "Five-minute boundary is valid baseline")
-        require(e.observe(state(11, at: 120), at: start.addingTimeInterval(400)) == nil, "A valid delayed snapshot only rebases, without historical rotation")
-        require(e.observe(state(20, at: 420), at: start.addingTimeInterval(420)) == nil, "Large gap needs a new recent baseline")
+        require(e.observe(state(10, at: 60), at: start.addingTimeInterval(360)) == nil, "Five-minute boundary is a valid baseline")
+        require(e.observe(state(11, at: 120), at: start.addingTimeInterval(421)) == nil, "A stale confirmed payload clears comparison and cannot rotate")
+        require(e.observe(state(20, at: 420), at: start.addingTimeInterval(421)) == nil, "First recent result after stale data establishes a fresh baseline")
         let result = e.observe(state(21, at: 480), at: start.addingTimeInterval(500))!
-        require(result.percentPerMinute == 1 && result.expiresAt == start.addingTimeInterval(555), "Delayed delivery cannot extend expiry beyond the capture plus 75 seconds")
+        require(result.percentPerMinute == 1 && result.expiresAt == start.addingTimeInterval(780), "Delayed delivery cannot extend expiry beyond capture plus five minutes")
         var expired = QuotaActivityEstimator(); _ = observe(&expired, 10, at: 0, reset: start.addingTimeInterval(60))
         require(observe(&expired, 80, at: 60, reset: start.addingTimeInterval(60)) == nil, "Expired quota never creates rotation")
     }
+
     static func intervalBounds() {
-        for (seconds, allowed) in [(4.0, false), (5, true), (180, true), (181, false)] {
+        for (seconds, allowed) in [(4.0, false), (5, true), (180, true), (240, true), (300, true), (301, false)] {
             var e = QuotaActivityEstimator(); _ = observe(&e, 10, at: 0)
             let next = observe(&e, 11, at: seconds)
-            require((next != nil) == allowed, "Require actual interval from 5 through 180 seconds")
+            require((next != nil) == allowed, "Confirmed intervals up to five minutes tolerate brief gaps without inventing a polling cadence")
             if let next { require(next.percentPerMinute == 60 / seconds, "Interval rate uses no assumed polling frequency") }
             if !allowed { require(observe(&e, 12, at: seconds + 60)?.percentPerMinute == 1, "Rejected interval still establishes the next fresh baseline") }
         }
@@ -137,15 +139,16 @@ struct QuotaActivityChecks {
     static func delayedDeliveryExpiresConservatively() {
         var e = QuotaActivityEstimator(); _ = observe(&e, 10, at: 0)
         let delayed = e.observe(state(11, at: 60), at: start.addingTimeInterval(80))!
-        require(delayed.expiresAt == start.addingTimeInterval(135), "Twenty-second delivery delay leaves 55 seconds of validity")
-        let almostExpired = e.observe(state(12, at: 120), at: start.addingTimeInterval(194))!
-        require(almostExpired.expiresAt == start.addingTimeInterval(195), "Seventy-four-second delayed delivery leaves only one second")
-        require(e.observe(state(13, at: 180), at: start.addingTimeInterval(255)) == nil, "At 75 seconds old, a snapshot cannot create an already expired estimate")
-        let fresh = e.observe(state(14, at: 240), at: start.addingTimeInterval(280))!
+        require(delayed.expiresAt == start.addingTimeInterval(360), "Delivery delay does not extend the confirmed five-minute lease")
+        let almostExpired = e.observe(state(12, at: 120), at: start.addingTimeInterval(419))!
+        require(almostExpired.expiresAt == start.addingTimeInterval(420), "A 299-second delayed capture leaves only one second")
+        require(e.observe(state(13, at: 180), at: start.addingTimeInterval(480)) == nil, "At five minutes old, a capture cannot create an already expired lease")
+        let fresh = e.observe(state(14, at: 240), at: start.addingTimeInterval(500))!
         require(fresh.sampledFrom == start.addingTimeInterval(180) && fresh.percentPerMinute == 1,
                 "Expired delivery may serve as the next stable baseline")
-        require(fresh.expiresAt == start.addingTimeInterval(315), "Future estimates retain their own capture-based expiry")
+        require(fresh.expiresAt == start.addingTimeInterval(540), "Each estimate retains its capture-based expiry")
     }
+
     static func subsecondResetJitterDoesNotRestartCycle() {
         var e = QuotaActivityEstimator()
         let firstReset = deadline.addingTimeInterval(0.295572)
@@ -158,8 +161,8 @@ struct QuotaActivityChecks {
                 "Subsecond deadline drift preserves the immediately preceding successful capture")
         let fast = observe(&e, 41, at: 90, reset: deadline.addingTimeInterval(-0.350705))
         require(fast?.percentPerMinute == 10, "Comparable higher quota rate survives jitter in either direction")
-        require(observe(&e, 41, at: 150, reset: firstReset) == nil,
-                "An unchanged quota still stops rotation despite rounding noise")
+        require(observe(&e, 41, at: 150, reset: firstReset) == fast,
+                "Unchanged quota preserves the prior lease despite rounding noise")
         require(observe(&e, 42, at: 210, reset: deadline.addingTimeInterval(2)) == nil,
                 "A deadline movement beyond one second conservatively establishes a new baseline")
         require(observe(&e, 43, at: 270, reset: deadline.addingTimeInterval(2.5))?.percentPerMinute == 1,
@@ -197,11 +200,60 @@ struct QuotaActivityChecks {
         require(observe(&drift, 14, at: 240, reset: deadline.addingTimeInterval(1.3)) != nil,
                 "A changed deadline establishes a new fixed anchor")
     }
+    static func fixedFiveMinuteLeaseAndRenewal() {
+        var e = QuotaActivityEstimator(); _ = observe(&e, 10, at: 0)
+        let first = observe(&e, 11, at: 60)!
+        for time: TimeInterval in [120, 180, 240, 300, 359] {
+            require(observe(&e, 11, at: time) == first, "Unchanged confirmed percentages retain the exact rate/start/expiry")
+        }
+        require(observe(&e, 11, at: 360) == nil, "Five continuous minutes without consumption stops exactly at the deadline")
+        require(observe(&e, 11, at: 420) == nil, "More unchanged observations cannot restart expired motion")
+        let resumed = observe(&e, 12, at: 480)!
+        require(resumed.percentPerMinute == 1 && resumed.expiresAt == start.addingTimeInterval(780), "A later genuine increment restarts a new five-minute lease")
+        let accelerated = observe(&e, 16, at: 540)!
+        require(accelerated.percentPerMinute == 4 && accelerated.expiresAt == start.addingTimeInterval(840), "Every real increment updates speed and renews from the actual capture")
+        require(observe(&e, 16, at: 600) == accelerated, "No growth after acceleration preserves its existing deadline")
+    }
+    static func replayAndShortUnchangedDoNotRenew() {
+        var e = QuotaActivityEstimator(); _ = observe(&e, 10, at: 0)
+        let positive = observe(&e, 11, at: 60)!
+        require(e.observe(state(90, at: 60), at: start.addingTimeInterval(120)) == positive, "A duplicate payload cannot renew or replace confirmed motion")
+        require(e.observe(state(99, at: 59), at: start.addingTimeInterval(180)) == positive, "Out-of-order payloads preserve only the existing lease")
+        require(e.observe(state(11, at: 61), at: start.addingTimeInterval(181)) == positive, "A sub-five-second unchanged capture does not stop a legitimate lease")
+        require(e.observe(state(12, at: 121), at: start.addingTimeInterval(182))?.percentPerMinute == 1, "Ignored replay values never alter the next measured delta")
+        var noGrowth = QuotaActivityEstimator(); _ = observe(&noGrowth, 10, at: 0)
+        for time: TimeInterval in [60, 120, 180, 240, 300, 360] {
+            require(observe(&noGrowth, 10, at: time) == nil, "Unchanged values alone never infer a running task")
+        }
+    }
+    static func invalidationAndKnownDeadlineBoundLease() {
+        func active() -> QuotaActivityEstimator {
+            var e = QuotaActivityEstimator(); _ = observe(&e, 10, at: 0); _ = observe(&e, 11, at: 60); return e
+        }
+        var recovered = active()
+        require(observe(&recovered, 5, at: 120) == nil, "Quota recovery immediately clears a live lease")
+        require(observe(&recovered, 5, at: 180) == nil, "Unchanged values after recovery cannot revive old motion")
+        var changed = active()
+        require(observe(&changed, 12, at: 120, reset: deadline.addingTimeInterval(20)) == nil, "Changed reset immediately clears a live lease")
+        require(observe(&changed, 12, at: 180, reset: deadline.addingTimeInterval(20)) == nil, "New cycle cannot retain the old estimate")
+        var missing = active()
+        require(observe(&missing, nil, at: 120) == nil, "Invalid confirmed payload clears a live lease")
+        require(observe(&missing, 12, at: 180) == nil, "After invalid data, two new confirmed captures are required")
+        var reset = active(); reset.reset()
+        require(observe(&reset, 12, at: 120) == nil, "Explicit source/sleep reset clears lease and comparison")
+        var nearDeadline = QuotaActivityEstimator()
+        let deadline = start.addingTimeInterval(120)
+        _ = observe(&nearDeadline, 10, at: 0, reset: deadline)
+        let bounded = observe(&nearDeadline, 11, at: 60, reset: deadline)!
+        require(bounded.expiresAt == deadline, "A known quota reset clips the five-minute lease without waiting for another query")
+        require(observe(&nearDeadline, 11, at: 120, reset: deadline) == nil, "The quota deadline ends the retained estimate immediately")
+    }
     static func main() {
         baselineAndActualInterval(); unchangedAndRecovery(); cycleChanges(); duplicateAndOutOfOrder()
         freshnessAndDeadline(); intervalBounds(); invalidNumbers(); chooseSingleOverallWindow()
         selectionChangesAndMissingWindow(); clockAndIdentityChanges(); delayedDeliveryExpiresConservatively()
         subsecondResetJitterDoesNotRestartCycle(); realDeadlineNumericFixtureAndCumulativeDrift()
-        print("PASS 13 quota activity interval, freshness, cycle, anchored deadline jitter and single-window estimation groups")
+        fixedFiveMinuteLeaseAndRenewal(); replayAndShortUnchangedDoNotRenew(); invalidationAndKnownDeadlineBoundLease()
+        print("PASS 16 quota activity groups: fixed five-minute grace, positive-only renewal, replay, resets, freshness and anchored jitter")
     }
 }

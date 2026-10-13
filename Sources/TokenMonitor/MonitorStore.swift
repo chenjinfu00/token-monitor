@@ -263,8 +263,7 @@ final class MonitorStore: ObservableObject {
                 claudeRetryDelay = 300
             case .failure(let error):
                 lastClaudeUsageError = error
-                if case .unconfirmed = error { activity.suspendClaudeQuotaInference() }
-                else { activity.resetClaudeQuota() }
+                activity.observeClaudeQuotaFailure(error)
                 claude.message = error.message + (claude.updatedAt == nil ? "" : " · 保留上次确认值")
                 if case .rateLimited = error {
                     claudeIsThrottled = true

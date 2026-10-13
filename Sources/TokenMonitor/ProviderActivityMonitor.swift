@@ -18,15 +18,28 @@ final class ProviderActivityStore: ObservableObject {
     private var claudeQuotaEstimator = QuotaActivityEstimator()
     private var claudeQuotaEstimate: QuotaActivityEstimate?
     private var lastClaudeQuotaAt: Date?
+    private var lastClaudeInterruptionAt: Date?
     private var quotaExpiryTimer: Timer?
 
     func observeClaudeQuota(_ state: ProviderState, at now: Date = Date()) {
         guard isStarted, !isSleeping else { return }
+        guard !UserDefaults.standard.bool(forKey: "claudeActivityDisabled") else {
+            resetClaudeQuota()
+            return
+        }
         guard let timestamp = state.updatedAt else { resetClaudeQuota(); return }
         // Replayed snapshots neither stop current activity nor extend its deadline.
         guard timestamp > (lastClaudeQuotaAt ?? .distantPast) else { return }
         guard timestamp <= now.addingTimeInterval(2) else { resetClaudeQuota(); return }
+        // A query captured before Stop/pause may arrive afterwards. It cannot
+        // establish a baseline for activity that would span that interruption.
+        guard timestamp > (lastClaudeInterruptionAt ?? .distantPast) else { return }
         lastClaudeQuotaAt = timestamp
+        guard !localClaude.isPaused else {
+            clearClaudeQuotaInference()
+            publish(at: now)
+            return
+        }
         claudeQuotaEstimate = claudeQuotaEstimator.observe(state, at: now)
         quotaExpiryTimer?.invalidate()
         quotaExpiryTimer = nil
@@ -47,24 +60,69 @@ final class ProviderActivityStore: ObservableObject {
         publish(at: now)
     }
 
-    func suspendClaudeQuotaInference() {
-        // An unconfirmed response cannot sustain motion or replace a confirmed sample.
+    func observeClaudeQuotaFailure(_ error: ClaudeUsageError, at now: Date = Date()) {
+        switch error {
+        case .unconfirmed, .timedOut, .unavailable, .rateLimited:
+            // A transient failure has no new numbers or lifecycle evidence.
+            // Let the last genuine consumption deadline expire on its own.
+            retainClaudeQuotaInference(at: now)
+        case .executableMissing, .invalidResponse:
+            resetClaudeQuota()
+        }
+    }
+
+    func retainClaudeQuotaInference(at now: Date = Date()) {
+        // An unconfirmed query carries no new evidence. Keep only the existing
+        // confirmed lease and its original timer; do not change the baseline.
+        if claudeQuotaEstimate.map({ $0.expiresAt <= now }) ?? false {
+            claudeQuotaEstimate = nil
+            quotaExpiryTimer?.invalidate()
+            quotaExpiryTimer = nil
+        }
+        publish(at: now)
+    }
+
+    private func clearClaudeQuotaInference() {
+        claudeQuotaEstimator.reset()
         claudeQuotaEstimate = nil
         quotaExpiryTimer?.invalidate()
         quotaExpiryTimer = nil
-        publish()
     }
 
     func resetClaudeQuota() {
-        claudeQuotaEstimator.reset()
+        clearClaudeQuotaInference()
         lastClaudeQuotaAt = nil
-        suspendClaudeQuotaInference()
+        lastClaudeInterruptionAt = nil
+        publish()
+    }
+
+    func observeLocalActivity(_ pair: ProviderActivityPair) {
+        localCodex = pair.codex
+        localClaude = pair.claude
+        if localClaude.isPaused {
+            if let interruptedAt = localClaude.lastTaskEventAt {
+                lastClaudeInterruptionAt = max(interruptedAt, lastClaudeInterruptionAt ?? .distantPast)
+            }
+            // Permission waits retire the lease even if event metadata is incomplete.
+            clearClaudeQuotaInference()
+        } else if localClaude.runningTaskCount == 0,
+                  let interruptedAt = localClaude.lastTaskEventAt,
+                  interruptedAt > (lastClaudeInterruptionAt ?? .distantPast) {
+            lastClaudeInterruptionAt = interruptedAt
+            // Losing the subsequent Stop snapshot cannot revive the retired lease.
+            clearClaudeQuotaInference()
+        }
+        publish()
     }
 
     private func publish(at now: Date = Date()) {
         var nextClaude = localClaude
-        if !UserDefaults.standard.bool(forKey: "claudeActivityDisabled"),
-           let estimate = claudeQuotaEstimate, estimate.expiresAt > now {
+        if UserDefaults.standard.bool(forKey: "claudeActivityDisabled") {
+            clearClaudeQuotaInference()
+            lastClaudeQuotaAt = nil
+            nextClaude = ProviderActivityState(statusNote: "Claude 活动采集已停用")
+        } else if let estimate = claudeQuotaEstimate, estimate.expiresAt > now,
+                  estimate.sampledFrom > (lastClaudeInterruptionAt ?? .distantPast) {
             nextClaude = localClaude.mergingQuotaEstimate(percentPerMinute: estimate.percentPerMinute, sampledFrom: estimate.sampledFrom)
         }
         if codex != localCodex { codex = localCodex }
@@ -89,6 +147,7 @@ final class ProviderActivityStore: ObservableObject {
                 "claudeActivityDisabled": UserDefaults.standard.bool(forKey: "claudeActivityDisabled"),
                 "codex": stateSnapshot(codex), "claude": stateSnapshot(claude),
                 "claudeLocal": stateSnapshot(localClaude), "claudeQuotaEstimate": estimate,
+                "claudeQuotaExpiryTimerScheduled": quotaExpiryTimer?.isValid ?? false,
                 "lastClaudeQuotaAt": lastClaudeQuotaAt.map { $0.timeIntervalSince1970 } as Any? ?? NSNull()]
     }
 
@@ -124,9 +183,7 @@ final class ProviderActivityStore: ObservableObject {
         worker.start { [weak self] pair in
             DispatchQueue.main.async {
                 guard let self, self.isStarted, !self.isSleeping, self.generation == expected else { return }
-                self.localCodex = pair.codex
-                self.localClaude = pair.claude
-                self.publish()
+                self.observeLocalActivity(pair)
             }
         }
     }
