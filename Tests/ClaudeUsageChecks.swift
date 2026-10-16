@@ -2,7 +2,7 @@ import Foundation
 
 // All fixtures are synthetic. These checks never launch the CLI or query an account.
 enum ClaudeUsageChecks {
-    static let checkCount = 12
+    static let checkCount = 15
     private static let now = Date(timeIntervalSince1970: 1_791_460_800)
     private static let reset = "2026-10-08T12:34:56.123456Z"
 
@@ -19,6 +19,9 @@ enum ClaudeUsageChecks {
         evidenceRequiresSuccessfulHTTPUsageRequest()
         failedOrFieldlessResponseInvalidatesSuccess()
         rateLimitInvalidatesSuccess()
+        snapshotAnswerIsRecentConfirmation()
+        refusedEndpointIsNotStaleSuccess()
+        failuresWithoutAnHTTPAnswerAreExplained()
     }
 
     private static func parse(_ limits: [String: Any]) -> ProviderState {
@@ -191,6 +194,95 @@ enum ClaudeUsageChecks {
                 XCTAssertFalse(evidence.rateLimited)
             }
         }
+    }
+
+    private static func snapshotAnswerIsRecentConfirmation() {
+        let snapshot = "2026-10-14T13:01:54.077Z [DEBUG] Usage read answered from a snapshot 41s old; endpoint not asked"
+        var evidence = ClaudeUsageEvidence()
+        evidence.observe(snapshot)
+        XCTAssertTrue(evidence.confirmedFresh)
+        XCTAssertEqual(evidence.confirmationAge, 41)
+        var stale = ClaudeUsageEvidence()
+        stale.observe("[DEBUG] Usage read answered from a snapshot 901s old; endpoint not asked")
+        XCTAssertFalse(stale.confirmedFresh)
+        var live = ClaudeUsageEvidence()
+        live.observe("[DEBUG] fetchUtilization: 200 after 2 attempt(s) (401\u{2192}refresh\u{2192}retry succeeded)")
+        XCTAssertTrue(live.confirmedFresh)
+        XCTAssertEqual(live.confirmationAge, 0)
+        for failure in ["fetchUtilization: 429 remembered for this bearer; not asking again for 300s",
+            "Failed to load usage data: Request failed with status code 429"] {
+            var limited = ClaudeUsageEvidence()
+            limited.observe(snapshot)
+            limited.observe(failure)
+            XCTAssertTrue(limited.rateLimited)
+            XCTAssertFalse(limited.confirmedFresh)
+        }
+        var fieldless = ClaudeUsageEvidence()
+        fieldless.observe(snapshot)
+        fieldless.observe("Usage fetch returned a fieldless or non-object body (in-band error)")
+        XCTAssertFalse(fieldless.confirmedFresh)
+    }
+
+    private static func refusedEndpointIsNotStaleSuccess() {
+        let success = "[DEBUG] fetchUtilization: 200 after 1 attempt(s)"
+        for refusal in ["[ERROR] Usage fetch returned a fieldless or non-object body (in-band error)",
+            "[DEBUG] fetchUtilization: 403 remembered for this bearer; not asking again for 300s"] {
+            for lines in [[success, refusal], [refusal, success]] {
+                var evidence = ClaudeUsageEvidence()
+                for line in lines { evidence.observe(line) }
+                XCTAssertTrue(evidence.serviceRejected)
+                XCTAssertFalse(evidence.confirmedFresh)
+                XCTAssertFalse(evidence.rateLimited)
+            }
+        }
+        var signedOut = ClaudeUsageEvidence()
+        signedOut.observe("[ERROR] Failed to load usage data: Auth error: no-auth")
+        XCTAssertFalse(signedOut.confirmedFresh)
+        XCTAssertFalse(signedOut.serviceRejected)
+        XCTAssertEqual(String(describing: signedOut.unconfirmedError), "signedOut")
+        var quiet = ClaudeUsageEvidence()
+        quiet.observe("[DEBUG] MDM settings load completed in 0ms")
+        XCTAssertEqual(String(describing: quiet.unconfirmedError), "unconfirmed")
+    }
+
+    // Claude Code 2.1.299 logs "Failed to load usage data" only for failures without
+    // an HTTP answer, or for 401/403/429; other server errors leave just the request line.
+    private static func failuresWithoutAnHTTPAnswerAreExplained() {
+        let request = "2026-10-14T18:12:17.001Z [DEBUG] fetchUtilization: GET /api/oauth/usage (attempt 1)"
+        for failure in ["[ERROR] Failed to load usage data: timeout of 5000ms exceeded",
+            "[ERROR] Failed to load usage data: getaddrinfo ENOTFOUND api.anthropic.com"] {
+            var evidence = ClaudeUsageEvidence()
+            evidence.observe(request)
+            evidence.observe(failure)
+            XCTAssertFalse(evidence.confirmedFresh)
+            XCTAssertFalse(evidence.rateLimited)
+            XCTAssertFalse(evidence.serviceRejected)
+            XCTAssertEqual(String(describing: evidence.unconfirmedError), "endpointUnavailable")
+        }
+        var silent = ClaudeUsageEvidence()
+        silent.observe(request)
+        // Until the CLI has exited, a missing success line may still arrive.
+        XCTAssertEqual(String(describing: silent.unconfirmedError), "unconfirmed")
+        silent.finish()
+        XCTAssertEqual(String(describing: silent.unconfirmedError), "endpointUnavailable")
+        var succeeded = ClaudeUsageEvidence()
+        succeeded.observe(request)
+        succeeded.observe("[DEBUG] fetchUtilization: 200 after 1 attempt(s)")
+        succeeded.finish()
+        XCTAssertTrue(succeeded.confirmedFresh)
+        for refusal in ["[ERROR] Failed to load usage data: Request failed with status code 403",
+            "[DEBUG] fetchUtilization: /api/oauth/usage replayed \u{2014} the endpoint answered 403 12s ago; not asked again for 288s"] {
+            var evidence = ClaudeUsageEvidence()
+            evidence.observe(refusal)
+            XCTAssertTrue(evidence.serviceRejected)
+            XCTAssertFalse(evidence.rateLimited)
+        }
+        var replayedLimit = ClaudeUsageEvidence()
+        replayedLimit.observe("[ERROR] Failed to load usage data: the endpoint answered 429 3s ago; not asked again for 297s")
+        XCTAssertTrue(replayedLimit.rateLimited)
+        var expired = ClaudeUsageEvidence()
+        expired.observe("[ERROR] Failed to load usage data: Request failed with status code 401")
+        XCTAssertEqual(String(describing: expired.unconfirmedError), "signedOut")
     }
 
     private static func rateLimitInvalidatesSuccess() {

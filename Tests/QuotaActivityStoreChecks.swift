@@ -60,6 +60,36 @@ struct QuotaActivityStoreChecks {
             "The automatic expiry callback clears its timer as well as its lease")
     }
 
+    static func codexQuotaInference() {
+        let store = ProviderActivityStore(); store.start(); defer { store.stop() }
+        func codexState(_ used: Double, at seconds: TimeInterval) -> ProviderState {
+            var state = ProviderState(name: "Codex", updatedAt: time(seconds))
+            state.windows = [QuotaWindow(id: "codex.primary", name: "5小时额度", usedPercent: used,
+                resetsAt: deadline, durationSeconds: 18_000)]
+            return state
+        }
+        func codexLease() -> [String: Any]? { store.diagnosticSnapshot()["codexQuotaEstimate"] as? [String: Any] }
+        UserDefaults.standard.setVolatileDomain(["claudeActivityDisabled": true], forName: UserDefaults.argumentDomain)
+        defer { UserDefaults.standard.setVolatileDomain(["claudeActivityDisabled": false], forName: UserDefaults.argumentDomain) }
+        store.observeCodexQuota(codexState(30, at: 0), at: time(0))
+        require(store.codex.rotationDuration == nil, "First Codex capture is a baseline")
+        store.observeCodexQuota(codexState(34, at: 60), at: time(60))
+        require(store.codex.isInferredFromQuota && store.codex.quotaPercentPerMinute == 4 && store.codex.rotationDuration != nil,
+            "Codex cloud or other-device work rotates from its own quota, even with Claude collection off")
+        require(store.claude.rotationDuration == nil && lease(store) == nil, "Codex quota never animates Claude")
+        require(store.diagnosticSnapshot()["codexQuotaExpiryTimerScheduled"] as? Bool == true, "The Codex lease has its own timer")
+        store.observeCodexQuotaFailure(at: time(120))
+        require(store.codex.rotationDuration != nil, "A failed Codex query keeps the confirmed lease")
+        store.observeLocalActivity(ProviderActivityPair(codex: ProviderActivityState(lastTaskEventAt: time(121))))
+        require(store.codex.rotationDuration == nil && codexLease() == nil, "A real local Codex task end retires the lease")
+        store.observeCodexQuota(codexState(35, at: 180), at: time(180))
+        store.observeCodexQuota(codexState(38, at: 240), at: time(240))
+        require(store.codex.rotationDuration != nil, "Later Codex consumption resumes after a fresh baseline")
+        store.resetCodexQuota()
+        require(store.codex.rotationDuration == nil && codexLease() == nil, "Reset clears the Codex lease")
+        require(store.diagnosticSnapshot()["codexQuotaExpiryTimerScheduled"] as? Bool == false, "Reset cancels the Codex timer")
+    }
+
     static func main() {
         let previousDomain = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
         UserDefaults.standard.setVolatileDomain(["claudeActivityDisabled": false], forName: UserDefaults.argumentDomain)
@@ -75,7 +105,8 @@ struct QuotaActivityStoreChecks {
         store.retainClaudeQuotaInference(at: time(180))
         require(store.claude.rotationDuration == firstSpeed && lease(store)!["expiresAt"] as! TimeInterval == expiry,
             "Repeated unconfirmed refreshes preserve confirmed animation without extending its timer")
-        for error: ClaudeUsageError in [.unconfirmed, .timedOut, .unavailable, .rateLimited] {
+        for error: ClaudeUsageError in [.unconfirmed, .timedOut, .unavailable, .rateLimited, .serviceRejected,
+                                        .endpointUnavailable] {
             store.observeClaudeQuotaFailure(error, at: time(180))
             require(store.claude.rotationDuration == firstSpeed && lease(store)!["expiresAt"] as! TimeInterval == expiry,
                 "Transient failures never erase or renew the confirmed lease")
@@ -152,7 +183,8 @@ struct QuotaActivityStoreChecks {
         require(store.claude.rotationDuration == nil, "First confirmed quota after re-enabling is a new baseline")
         store.observeClaudeQuota(snapshot(8, at: 1560), at: time(1560))
         require(store.claude.rotationDuration != nil, "Fresh post-disable consumption resumes normally")
-        for (offset, error): (Int, ClaudeUsageError) in [.executableMissing, .invalidResponse].enumerated() {
+        for (offset, error): (Int, ClaudeUsageError) in [.executableMissing, .invalidResponse, .signedOut,
+                                                         .noSubscriptionLimits].enumerated() {
             store.observeClaudeQuotaFailure(error)
             require(store.claude.rotationDuration == nil && lease(store) == nil, "A nontransient failure clears activity immediately")
             require(store.diagnosticSnapshot()["claudeQuotaExpiryTimerScheduled"] as? Bool == false, "A nontransient failure cancels the old timer")
@@ -165,6 +197,7 @@ struct QuotaActivityStoreChecks {
         store.stop()
         require(store.claude.rotationDuration == nil && lease(store) == nil, "Stopping activity monitor cancels inferred rotation")
         automaticExpiryWithoutFurtherRefresh()
-        print("PASS offline production store: transient/unchanged retention, automatic timer expiry, late Stop capture, speed renewal and reset")
+        codexQuotaInference()
+        print("PASS offline production store: transient/unchanged retention, automatic timer expiry, late Stop capture, speed renewal, reset and Codex quota inference")
     }
 }

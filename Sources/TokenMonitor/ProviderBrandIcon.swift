@@ -201,6 +201,8 @@ final class ProviderBrandLayerView: NSView {
     required init?(coder: NSCoder) { nil }
 
     // Buttons and the existing native drag regions retain ownership of clicks.
+    // Because this view is never hit, a Button whose label is only this icon
+    // has no hit area: give that label a .contentShape (see providerButton).
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     override func layout() {

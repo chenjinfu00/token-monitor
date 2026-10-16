@@ -41,6 +41,10 @@ final class MonitorStore: ObservableObject {
     private var lastClaudeFetchStarted = Date.distantPast
     private var lastClaudeUsageError: ClaudeUsageError?
     private let demo: Bool
+    // Claude Code answers usage reads within 60 seconds of its last confirmed
+    // fetch from a snapshot. Query just outside that window, so each scheduled
+    // read is a real server refresh; manual refreshes may still use the snapshot.
+    private static let claudeRefreshInterval: TimeInterval = 65
 
     static var dataDirectory: URL {
         if let path = ProcessInfo.processInfo.environment["TOKEN_MONITOR_DATA_DIR"] { return URL(fileURLWithPath: path) }
@@ -122,6 +126,9 @@ final class MonitorStore: ObservableObject {
                 self.codex.resetCreditCount = snapshot.resetCreditCount
                 self.codex.updatedAt = now
                 self.history.observe(provider: .codex, state: self.codex, at: now)
+                // Codex work this Mac cannot see (cloud tasks, other devices) still
+                // turns the icon through its quota.
+                self.activity.observeCodexQuota(self.codex, at: now)
                 if tracked.recovered { self.lastRecoveryAt = now }
                 if snapshot.windows.isEmpty { self.codex.message = "账户未返回订阅额度 · 请确认使用 ChatGPT 登录" }
                 else if let recovered = self.lastRecoveryAt, now.timeIntervalSince(recovered) < 86400 {
@@ -129,6 +136,7 @@ final class MonitorStore: ObservableObject {
                 } else { self.codex.message = nil }
             case .failure(let error):
                 self.codex.message = error.message
+                self.activity.observeCodexQuotaFailure()
             }
         }
     }
@@ -243,7 +251,7 @@ final class MonitorStore: ObservableObject {
         claudeFetchGeneration += 1
         let generation = claudeFetchGeneration
         claude.isLoading = true
-        nextClaudeFetch = Date().addingTimeInterval(60)
+        nextClaudeFetch = Date().addingTimeInterval(Self.claudeRefreshInterval)
         claudeRefreshTask = Task {
             let outcome = await Task.detached(priority: .utility) { () -> Result<ProviderState, ClaudeUsageError> in
                 do { return .success(try ClaudeUsageProbe.read()) }
@@ -265,10 +273,20 @@ final class MonitorStore: ObservableObject {
                 lastClaudeUsageError = error
                 activity.observeClaudeQuotaFailure(error)
                 claude.message = error.message + (claude.updatedAt == nil ? "" : " · 保留上次确认值")
-                if case .rateLimited = error {
+                switch error {
+                case .rateLimited, .serviceRejected:
+                    // Back off: polling a refusing endpoint every minute only
+                    // keeps the refusal going.
                     claudeIsThrottled = true
                     nextClaudeFetch = Date().addingTimeInterval(claudeRetryDelay)
                     claudeRetryDelay = min(3600, claudeRetryDelay * 2)
+                case .signedOut, .noSubscriptionLimits:
+                    // Nothing changes until the user signs in again: offer the
+                    // login action and query less often. A manual refresh still runs.
+                    claudeNeedsLogin = true
+                    nextClaudeFetch = Date().addingTimeInterval(300)
+                default:
+                    break
                 }
             }
         }

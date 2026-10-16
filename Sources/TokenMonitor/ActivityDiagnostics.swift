@@ -44,6 +44,20 @@ enum ActivityDiagnostics {
         }
     }
 
+    static func resetNewsSnapshot(_ state: ResetNewsState, at now: Date = Date()) -> [String: Any] {
+        let reference: Any = state.reference.map {
+            ["kind": $0.targetKind.rawValue, "confidence": $0.confidence.rawValue,
+             "confidencePercent": $0.confidencePercent as Any? ?? NSNull(),
+             "startAt": $0.startAt.timeIntervalSince1970,
+             "targetAt": $0.referenceAt.timeIntervalSince1970,
+             "remainingPercent": $0.remainingPercent(at: now)] as [String: Any]
+        } ?? NSNull()
+        return ["canShowReference": state.canShowReference(at: now), "reference": reference,
+                "updatedAt": state.updatedAt.map { $0.timeIntervalSince1970 } as Any? ?? NSNull(),
+                "isLoading": state.isLoading, "sourceIsStale": state.sourceIsStale,
+                "hasError": !(state.message?.isEmpty ?? true)]
+    }
+
     static func quotaSnapshot(_ state: ProviderState) -> [String: Any] {
         ["updatedAt": state.updatedAt.map { $0.timeIntervalSince1970 } as Any? ?? NSNull(),
          "isLoading": state.isLoading,

@@ -73,6 +73,10 @@ final class CodexActivityProbe {
         let cached: Int
         let output: Int
         var effective: Int { input - cached + output }
+        // Output-equivalent cost: fresh input and cached input at their list price.
+        var weighted: Double {
+            Double(output) + Double(input - cached) * TokenWeights.codexInput + Double(cached) * TokenWeights.codexCachedInput
+        }
         func continues(_ previous: Counters) -> Bool {
             input >= previous.input && cached >= previous.cached && output >= previous.output
         }
@@ -315,7 +319,7 @@ final class CodexActivityProbe {
                   current.effective > previous.effective,
                   at >= now.addingTimeInterval(-120) else { return }
             deltas.append(ActivityTokenDelta(sessionID: sessionID, at: at,
-                tokens: current.effective - previous.effective))
+                tokens: current.effective - previous.effective, weightedTokens: current.weighted - previous.weighted))
         }
     }
 }

@@ -2,7 +2,8 @@ import Foundation
 import Darwin
 
 enum ClaudeUsageError: Error {
-    case executableMissing, timedOut, unavailable, invalidResponse, rateLimited, unconfirmed
+    case executableMissing, timedOut, unavailable, invalidResponse, rateLimited, unconfirmed, serviceRejected
+    case endpointUnavailable, signedOut, noSubscriptionLimits
 
     var message: String {
         switch self {
@@ -12,11 +13,19 @@ enum ClaudeUsageError: Error {
         case .invalidResponse: return "当前 Claude Code 未返回可解析的实时额度"
         case .rateLimited: return "Claude 查询频率受限 · 稍后自动重试"
         case .unconfirmed: return "未确认 Claude 服务端更新 · 将自动重试"
+        case .serviceRejected: return "Claude 用量接口暂时拒绝查询 · 稍后自动重试"
+        case .endpointUnavailable: return "Claude 用量接口暂时无响应 · 将自动重试"
+        case .signedOut: return "Claude Code 登录已失效 · 请重新登录"
+        case .noSubscriptionLimits: return "Claude Code 当前登录不含订阅额度 · 请用 Pro/Max 等订阅账号登录"
         }
     }
 }
 
 enum ClaudeUsageProbe {
+    // Once the usage payload arrives, stdin is closed and the CLI exits within
+    // a fraction of a second, flushing its diagnostics. Never hold it longer.
+    static let evidenceGrace: TimeInterval = 5
+
     // The official CLI owns its credentials and refreshes them itself. Only
     // control messages are sent: no user prompt, conversation, or model call.
     static func read(timeout: TimeInterval = 20) throws -> ProviderState {
@@ -45,9 +54,16 @@ enum ClaudeUsageProbe {
         guard fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) != -1 else {
             throw ClaudeUsageError.unavailable
         }
+        var inputClosed = false
+        // Closing stdin lets the CLI exit and flush the rest of its diagnostics.
+        func closeInput() {
+            guard !inputClosed else { return }
+            inputClosed = true
+            try? input.fileHandleForWriting.close()
+        }
         do { try process.run() } catch { throw ClaudeUsageError.unavailable }
         defer {
-            try? input.fileHandleForWriting.close()
+            closeInput()
             if process.isRunning {
                 process.terminate()
                 let stop = Date().addingTimeInterval(1)
@@ -58,16 +74,17 @@ enum ClaudeUsageProbe {
             try? diagnostics.fileHandleForReading.close()
         }
 
-        func send(id: String, subtype: String) throws {
-            var data = try JSONSerialization.data(withJSONObject: [
-                "type": "control_request", "request_id": id, "request": ["subtype": subtype]
-            ])
+        func send(id: String, subtype: String, parameters: [String: Any] = [:]) throws {
+            var request: [String: Any] = ["subtype": subtype]
+            for (key, value) in parameters { request[key] = value }
+            let message: [String: Any] = ["type": "control_request", "request_id": id, "request": request]
+            var data = try JSONSerialization.data(withJSONObject: message)
             data.append(10)
             do { try input.fileHandleForWriting.write(contentsOf: data) }
             catch { throw ClaudeUsageError.unavailable }
         }
         try send(id: "tm_init", subtype: "initialize")
-        let deadline = Date().addingTimeInterval(timeout)
+        var deadline = Date().addingTimeInterval(timeout)
         let fd = output.fileHandleForReading.fileDescriptor
         let diagnosticFD = diagnostics.fileHandleForReading.fileDescriptor
         var buffer = Data(), total = 0, initialized = false, outputClosed = false
@@ -80,9 +97,15 @@ enum ClaudeUsageProbe {
         // receives confirmation; never accept cached/unconfirmed quota data.
         func confirmedUsage() throws -> ProviderState? {
             guard let pendingUsage else { return nil }
+            // The CLI states that this login has no plan limits (an API key, an
+            // inference-only token or no claude.ai login) and never asked the endpoint.
+            if pendingUsage["rate_limits_available"] as? Bool == false { throw ClaudeUsageError.noSubscriptionLimits }
             if evidence.rateLimited { throw ClaudeUsageError.rateLimited }
+            // The CLI answered from its fallback cache after the endpoint refused.
+            if evidence.serviceRejected { throw ClaudeUsageError.serviceRejected }
             guard evidence.confirmedFresh else { return nil }
-            return try ClaudeUsageParser.parse(pendingUsage)
+            // A snapshot answer is stamped with its server confirmation time.
+            return try ClaudeUsageParser.parse(pendingUsage, at: Date().addingTimeInterval(-evidence.confirmationAge))
         }
 
         func drainDiagnostics() throws {
@@ -98,10 +121,12 @@ enum ClaudeUsageProbe {
                         evidence.observe(String(decoding: diagnosticBuffer, as: UTF8.self))
                         diagnosticBuffer.removeAll(keepingCapacity: false)
                     }
+                    evidence.finish()
                     break
                 }
                 diagnosticTotal += count
-                guard diagnosticTotal <= 1_048_576 else { throw ClaudeUsageError.invalidResponse }
+                // Debug output only covers the CLI's own startup; keep a generous bound.
+                guard diagnosticTotal <= 8_388_608 else { throw ClaudeUsageError.invalidResponse }
                 diagnosticBuffer.append(contentsOf: chunk.prefix(count))
                 while let newline = diagnosticBuffer.firstIndex(of: 10) {
                     let line = String(decoding: diagnosticBuffer[..<newline], as: UTF8.self)
@@ -121,7 +146,7 @@ enum ClaudeUsageProbe {
             if ready == 0 { continue }
             try drainDiagnostics()
             if let state = try confirmedUsage() { return state }
-            if pendingUsage != nil && diagnosticClosed { throw ClaudeUsageError.unconfirmed }
+            if pendingUsage != nil && diagnosticClosed { throw evidence.unconfirmedError }
             guard descriptors[0].revents != 0 else { continue }
             var chunk = [UInt8](repeating: 0, count: 8192)
             let count = Darwin.read(fd, &chunk, chunk.count)
@@ -150,36 +175,92 @@ enum ClaudeUsageProbe {
                 }
                 if id == "tm_init", !initialized {
                     initialized = true
-                    try send(id: "tm_usage", subtype: "get_usage")
+                    // A usage meter needs only plan limits: skip the CLI's scan of
+                    // every transcript touched in the last seven days.
+                    try send(id: "tm_usage", subtype: "get_usage", parameters: ["skip_behaviors": true])
                 } else if id == "tm_usage", initialized, let result = response["response"] as? [String: Any] {
                     pendingUsage = result
+                    closeInput()
+                    deadline = min(deadline, Date().addingTimeInterval(evidenceGrace))
                     try drainDiagnostics()
                     if let state = try confirmedUsage() { return state }
-                    if diagnosticClosed { throw ClaudeUsageError.unconfirmed }
+                    if diagnosticClosed { throw evidence.unconfirmedError }
                 }
             }
         }
-        if pendingUsage != nil { throw ClaudeUsageError.unconfirmed }
+        if pendingUsage != nil { throw evidence.unconfirmedError }
         throw ClaudeUsageError.timedOut
     }
 }
 
 struct ClaudeUsageEvidence {
+    // Claude Code 2.1.25x+ persists each confirmed reading and answers a read
+    // within 60 seconds from it without asking the endpoint again. That answer
+    // is still server-confirmed, just slightly older; long-cached ones are not.
+    static let maximumSnapshotAge: TimeInterval = 300
+    private static let snapshotPattern = try? NSRegularExpression(
+        pattern: "Usage read answered from a snapshot ([0-9]{1,7})s old; endpoint not asked")
     private var successfulRequest = false
+    private var snapshotAge: TimeInterval?
     private var unusableResponse = false
     private(set) var rateLimited = false
-    var confirmedFresh: Bool { successfulRequest && !unusableResponse && !rateLimited }
+    // The endpoint refused this account (403) or answered with an in-band error
+    // envelope such as a rate limit; querying again right away prolongs it.
+    private(set) var serviceRejected = false
+    private var authenticationFailed = false
+    // The CLI asked the endpoint but got no HTTP answer (timeout, DNS, proxy or
+    // TLS failure) or a server error, and answered from its own cache instead.
+    private var requestAttempted = false
+    private var transportFailed = false
+    // The CLI has exited and every diagnostic line has been read.
+    private var complete = false
+    var confirmedFresh: Bool {
+        (successfulRequest || snapshotAge != nil) && !unusableResponse && !rateLimited && !serviceRejected
+    }
+    // Why an answer had no freshness evidence, as far as the diagnostics tell.
+    var unconfirmedError: ClaudeUsageError {
+        if authenticationFailed { return .signedOut }
+        // A request line without its success line, once all output is in, failed.
+        if transportFailed || (complete && requestAttempted && !successfulRequest) { return .endpointUnavailable }
+        return .unconfirmed
+    }
+    // Seconds between the confirming server response and this read.
+    var confirmationAge: TimeInterval { successfulRequest ? 0 : (snapshotAge ?? 0) }
+
+    mutating func finish() { complete = true }
 
     mutating func observe(_ line: String) {
         if line.range(of: "fetchUtilization: 200 after [0-9]+ attempt\\(s\\)", options: .regularExpression) != nil {
             successfulRequest = true
         }
+        if let pattern = Self.snapshotPattern,
+           let match = pattern.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+           let digits = Range(match.range(at: 1), in: line),
+           let seconds = Double(String(line[digits])), seconds <= Self.maximumSnapshotAge {
+            snapshotAge = seconds
+        }
         let lower = line.lowercased()
-        if lower.contains("fieldless or non-object body") || lower.contains("failed to load usage data") {
+        let failedLoad = lower.contains("failed to load usage data")
+        if lower.contains("fetchutilization: get ") { requestAttempted = true }
+        if lower.contains("fieldless or non-object body") || failedLoad {
             unusableResponse = true
         }
-        if (lower.contains("fetchutilization") || lower.contains("failed to load usage data")) && lower.contains("429") {
+        if (lower.contains("fetchutilization") || failedLoad) && lower.contains("429") {
             rateLimited = true
+        }
+        // 403 now, or one remembered from earlier in this CLI process ("answered 403").
+        let forbidden = lower.contains("status code 403") || lower.contains("answered 403")
+            || (lower.contains("fetchutilization: 403") && lower.contains("remembered for this bearer"))
+        if lower.contains("non-object body (in-band error)")
+            || (forbidden && (failedLoad || lower.contains("fetchutilization"))) {
+            serviceRejected = true
+        }
+        if failedLoad && (lower.contains("auth error") || lower.contains("status code 401")
+            || lower.contains("answered 401")) {
+            authenticationFailed = true
+        } else if failedLoad && !lower.contains("429") && !forbidden {
+            // The CLI logs this for failures without an HTTP answer.
+            transportFailed = true
         }
     }
 }

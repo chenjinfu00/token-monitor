@@ -19,13 +19,15 @@ struct QuotaPacingGuide: Identifiable, Equatable {
     let anchor: Anchor
     let startAt: Date
     let targetAt: Date
+    let forecastConfidence: WebsiteResetReference.Confidence?
     var id: String { [provider.rawValue, windowID, source.rawValue, String(startAt.timeIntervalSince1970), String(targetAt.timeIntervalSince1970)].joined(separator: "|") }
     var sourceURL: URL? { source == .codexResetForecast ? URL(string: "https://codex-resets.com/zh-CN") : nil }
 
     private init(provider: HistoryProvider, windowID: String, source: Source, anchor: Anchor,
-                 startAt: Date, targetAt: Date) {
+                 startAt: Date, targetAt: Date, forecastConfidence: WebsiteResetReference.Confidence? = nil) {
         self.provider = provider; self.windowID = windowID; self.source = source
         self.anchor = anchor; self.startAt = startAt; self.targetAt = targetAt
+        self.forecastConfidence = forecastConfidence
     }
 
     static func make(provider: HistoryProvider, window: QuotaWindow,
@@ -59,13 +61,15 @@ struct QuotaPacingGuide: Identifiable, Equatable {
         }
         let official = QuotaPacingGuide(provider: provider, windowID: window.id, source: .official,
             anchor: anchor, startAt: start, targetAt: deadline)
-        guard provider == .codex, let reference, reference.targetKind == .deadline,
+        guard provider == .codex, let reference,
+              reference.targetKind == .deadline || reference.targetKind == .forecastWindow,
               finite(reference.startAt), reference.startAt <= now,
               finite(reference.referenceAt), reference.referenceAt > reference.startAt,
               reference.referenceAt > now, reference.referenceAt > start, reference.referenceAt < deadline,
               finite(reference.windowEndAt), reference.windowEndAt > now else { return [official] }
         return [official, QuotaPacingGuide(provider: provider, windowID: window.id,
-            source: .codexResetForecast, anchor: anchor, startAt: start, targetAt: reference.referenceAt)]
+            source: .codexResetForecast, anchor: anchor, startAt: start, targetAt: reference.referenceAt,
+            forecastConfidence: reference.confidence)]
     }
 
     /// Percentages outside the cycle clamp to its endpoints, never below 0% or above 100%.

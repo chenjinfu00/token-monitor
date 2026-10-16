@@ -89,7 +89,11 @@ import SQLite3
         require(initial.watchedFiles.contains(where: { $0.lastPathComponent == fixture.paths[a]!.lastPathComponent }) && initial.watchedDirectories.contains(where: { $0.lastPathComponent == fixture.locks.lastPathComponent }), "Observe a held session and new locks")
         fixture.count(a, input: 2_000, cached: 1_600, output: 80, reasoning: 50_000, at: now.addingTimeInterval(1))
         let fresh = probe.read(at: now.addingTimeInterval(1))
-        require(fresh.tokenDeltas == [ActivityTokenDelta(sessionID: a, at: now.addingTimeInterval(1), tokens: 230)], "Subtract cached input and do not add reasoning twice")
+        require(fresh.tokenDeltas.count == 1 && fresh.tokenDeltas[0].sessionID == a
+            && fresh.tokenDeltas[0].at == now.addingTimeInterval(1) && fresh.tokenDeltas[0].tokens == 230,
+            "Subtract cached input and do not add reasoning twice")
+        require(abs((fresh.tokenDeltas[0].weightedTokens ?? 0) - 65) < 0.001,
+            "Speed weight: output 30 + fresh input 200 x 1/8 + cached input 800 x 1/80")
         fixture.count(a, input: 2_000, cached: 1_600, output: 80, reasoning: 50_000, at: now.addingTimeInterval(2))
         require(probe.read(at: now.addingTimeInterval(2)).tokenDeltas.isEmpty, "Repeated totals must not inflate rate")
         require(probe.read(at: now.addingTimeInterval(3)).tokenDeltas.isEmpty, "Unchanged file is never replayed")

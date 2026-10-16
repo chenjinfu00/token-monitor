@@ -1,12 +1,38 @@
 import Foundation
 
 struct WebsiteResetReference: Equatable {
-    enum TargetKind: String { case center, deadline }
+    enum TargetKind: String { case center, deadline, forecastWindow }
+    enum Confidence: String {
+        case unknown, low, medium, high, announced
+        var label: String {
+            switch self {
+            case .unknown: return "置信度待定"
+            case .low: return "较低置信度"
+            case .medium: return "中等置信度"
+            case .high: return "较高置信度"
+            case .announced: return "已公告"
+            }
+        }
+    }
     let startAt: Date
     let referenceAt: Date
     let windowStartAt: Date
     let windowEndAt: Date
     let targetKind: TargetKind
+    var confidencePercent: Double? = nil
+
+    var confidence: Confidence {
+        if targetKind == .deadline { return .announced }
+        guard let value = confidencePercent, value.isFinite,
+              (0...100).contains(value), value.rounded() == value else { return .unknown }
+        return value >= 70 ? .high : value >= 40 ? .medium : .low
+    }
+
+    var confidenceDescription: String {
+        if confidence == .announced { return "网站公告 · 执行待确认" }
+        guard confidence != .unknown, let value = confidencePercent else { return "网站未提供置信度" }
+        return "网站估计概率：\(Int(value))% · " + confidence.label
+    }
 
     func remainingPercent(at now: Date) -> Double {
         max(0, min(100, referenceAt.timeIntervalSince(now) / referenceAt.timeIntervalSince(startAt) * 100))
@@ -19,7 +45,8 @@ struct WebsiteResetReference: Equatable {
         if minutes >= 1440 { time = "\(minutes / 1440)天 \((minutes % 1440) / 60)小时" }
         else if minutes >= 60 { time = "\(minutes / 60)小时 \(minutes % 60)分钟" }
         else { time = "\(minutes)分钟" }
-        return "网站目标：\(time)后 · 账户恢复待确认"
+        let label = targetKind == .forecastWindow ? "网站预测窗口：" : "网站目标："
+        return label + "\(time)后 · 账户恢复待确认"
     }
 }
 
@@ -78,8 +105,41 @@ enum ResetNewsParser {
     }
 
     static func prediction(_ data: [String: Any]?, at now: Date) -> WebsiteResetReference? {
-        // Only the documented scheduled_for is a reset target. Watch expiry,
-        // natural-language forecast_window and historical averages are not.
+        if let scheduled = scheduledPrediction(data, at: now) { return scheduled }
+        guard let watch = data?["active_watch"] as? [String: Any],
+              ["elevated", "strong"].contains(watch["level"] as? String ?? ""),
+              validSource(watch, allowObserved: true),
+              let observedAt = date(watch["observed_at"]), observedAt <= now,
+              let expiresAt = date(watch["expires_at"]), expiresAt > now,
+              let span = forecastSpan(watch["forecast_window"]),
+              expiresAt > observedAt,
+              expiresAt.timeIntervalSince(observedAt) <= span + 3600 else { return nil }
+        if let latest = data?["latest_reset"] as? [String: Any], latest["reset_type"] as? String == "regular",
+           let resetAt = eventDate(latest, at: now), resetAt >= observedAt { return nil }
+        // The site's banner uses expires_at as the end of a numeric "within"
+        // forecast (rounded to an hour). It is a prediction window, never an
+        // announced execution time. An expiry without that window is insufficient.
+        let chance = QuotaParser.number(watch["reset_chance_percent"]).flatMap { value -> Double? in
+            value.isFinite && (0...100).contains(value) && value.rounded() == value ? value : nil
+        }
+        return WebsiteResetReference(startAt: observedAt, referenceAt: expiresAt,
+            windowStartAt: observedAt, windowEndAt: expiresAt, targetKind: .forecastWindow,
+            confidencePercent: chance)
+    }
+
+    private static func forecastSpan(_ value: Any?) -> TimeInterval? {
+        guard let text = value as? String, text.utf8.count <= 80,
+              let expression = try? NSRegularExpression(pattern: #"^within\s+([0-9]+(?:\.[0-9]+)?)\s*(m|mins?|minutes?|h|hrs?|hours?|d|days?)$"#, options: .caseInsensitive),
+              let match = expression.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let amountRange = Range(match.range(at: 1), in: text), let amount = Double(text[amountRange]),
+              let unitRange = Range(match.range(at: 2), in: text) else { return nil }
+        let unit = text[unitRange].lowercased()
+        let seconds = amount * (unit.hasPrefix("d") ? 86400 : unit.hasPrefix("h") ? 3600 : 60)
+        return seconds.isFinite && seconds > 0 && seconds < 366 * 86400 ? seconds : nil
+    }
+
+    private static func scheduledPrediction(_ data: [String: Any]?, at now: Date) -> WebsiteResetReference? {
+        // An explicit announcement remains preferable to a speculative watch.
         guard let scheduled = data?["scheduled_reset"] as? [String: Any],
               scheduled["status"] as? String == "scheduled", scheduled["reset_type"] as? String == "regular",
               let announcedAt = eventDate(scheduled, at: now, allowObserved: false),

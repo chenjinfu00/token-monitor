@@ -38,6 +38,11 @@ xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks
   Sources/TokenMonitor/HistoryModels.swift Sources/TokenMonitor/QuotaPacingGuide.swift \
   Tests/PacingGuideChecks.swift -o .build/PacingGuideChecks
 .build/PacingGuideChecks
+xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
+  Sources/TokenMonitor/Models.swift Sources/TokenMonitor/ResetNewsService.swift \
+  Sources/TokenMonitor/HistoryModels.swift Sources/TokenMonitor/QuotaPacingGuide.swift \
+  Tests/ResetWatchChecks.swift -o .build/ResetWatchChecks
+.build/ResetWatchChecks
 .build/HistoryChecks
 xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
   Sources/TokenMonitor/HistoryModels.swift Sources/TokenMonitor/HistoryAnnualUsage.swift \
@@ -51,12 +56,13 @@ xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks
 .build/ActivityModelChecks
 xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
   Sources/TokenMonitor/Models.swift Sources/TokenMonitor/QuotaActivityEstimator.swift \
-  Tests/QuotaActivityChecks.swift -o .build/QuotaActivityChecks
+  Sources/TokenMonitor/ActivityModels.swift Tests/QuotaActivityChecks.swift -o .build/QuotaActivityChecks
 .build/QuotaActivityChecks
 xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
   Sources/TokenMonitor/Models.swift Sources/TokenMonitor/ActivityModels.swift \
   Sources/TokenMonitor/QuotaActivityEstimator.swift Sources/TokenMonitor/ProviderActivityMonitor.swift \
   Sources/TokenMonitor/ClaudeUsageProbe.swift Sources/TokenMonitor/ClaudeAuthProbe.swift \
+  Sources/TokenMonitor/ClaudeActivityHook.swift Sources/TokenMonitor/ClaudeTelemetry.swift \
   Tests/QuotaActivityStoreChecks.swift -o .build/QuotaActivityStoreChecks
 .build/QuotaActivityStoreChecks
 xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
@@ -68,4 +74,9 @@ xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks
   Sources/TokenMonitor/ClaudeActivityHook.swift Sources/TokenMonitor/ClaudeActivityHookInstaller.swift \
   Tests/ClaudeActivityChecks.swift -o .build/ClaudeActivityChecks
 .build/ClaudeActivityChecks
+xcrun swiftc -swift-version 5 -parse-as-library -module-cache-path .build/checks-cache \
+  Sources/TokenMonitor/ActivityModels.swift Sources/TokenMonitor/ClaudeActivityHook.swift \
+  Sources/TokenMonitor/ClaudeTelemetry.swift Sources/TokenMonitor/ClaudeTelemetryInstaller.swift \
+  Tests/ClaudeTelemetryChecks.swift -o .build/ClaudeTelemetryChecks
+.build/ClaudeTelemetryChecks
 "$token_monitor_python" -m unittest discover -s tools -p 'test_*.py'

@@ -126,11 +126,40 @@ import Darwin
         f.append(f.usage()); f.event("PreToolUse", at: now.addingTimeInterval(1))
         let first = p.read(at: now.addingTimeInterval(1))
         require(first.tokenDeltas.first?.tokens == 18, "Fresh input, output and cache writes count; cache reads and reasoning do not")
+        require(abs((first.tokenDeltas.first?.weightedTokens ?? 0) - 2_007.75) < 0.001,
+            "Speed weighs output fully, input 1/5, cache writes 1/4 and cache reads 1/50 of their count")
         f.append(f.usage(output: 8, at: now.addingTimeInterval(2))); f.event("PostToolUse", at: now.addingTimeInterval(2))
-        require(p.read(at: now.addingTimeInterval(2)).tokenDeltas.first?.tokens == 3, "Streaming usage is the maximum per API message")
+        let streamed = p.read(at: now.addingTimeInterval(2)).tokenDeltas.first
+        require(streamed?.tokens == 3 && streamed?.weightedTokens == 3, "Streaming usage is the maximum per API message")
         f.append(f.usage(output: 8, at: now.addingTimeInterval(3))); f.event("PreToolUse", at: now.addingTimeInterval(3))
         require(p.read(at: now.addingTimeInterval(3)).tokenDeltas.isEmpty, "Repeated content blocks cannot inflate rate")
         p.reset(); require(p.read(at: now.addingTimeInterval(3)).tokenDeltas.isEmpty, "Wake/reset does not replay old totals")
+        checks += 1
+    }
+    static func olderSnapshotsStayReadable() {
+        let f = Fixture(); f.event("UserPromptSubmit")
+        let p = ClaudeActivityProbe(homeDirectory: f.home, ownerIsAlive: { _ in true }); _ = p.read(at: now)
+        f.append(f.usage()); f.event("PreToolUse", at: now.addingTimeInterval(1))
+        // Store the snapshot the way 0.10.5 did: no weighted total and no cache reads.
+        var document = try! JSONSerialization.jsonObject(with: Data(contentsOf: f.snapshotURL)) as! [String: Any]
+        document.removeValue(forKey: "weightedTokens")
+        if var requests = document["requests"] as? [String: [String: Any]] {
+            for key in Array(requests.keys) { requests[key]?.removeValue(forKey: "cacheRead") }
+            document["requests"] = requests
+        }
+        try! ClaudeActivityFiles.atomicWrite(try! JSONSerialization.data(withJSONObject: document), to: f.snapshotURL)
+        require(f.snapshot().weightedTokens == nil, "Older snapshots decode without the new fields")
+        let legacy = p.read(at: now.addingTimeInterval(1)).tokenDeltas.first
+        require(legacy?.tokens == 18 && legacy?.weightedTokens == nil, "Without a weighted baseline the raw count is used")
+        f.append(f.usage(output: 9, at: now.addingTimeInterval(2))); f.event("PostToolUse", at: now.addingTimeInterval(2))
+        let resumed = p.read(at: now.addingTimeInterval(2)).tokenDeltas.first
+        require(f.snapshot().weightedTokens != nil && resumed?.tokens == 4 && resumed?.weightedTokens == nil,
+            "The next hook resumes weighted counting; one more read sets its baseline")
+        f.append(f.usage("message-second", request: "request-second", at: now.addingTimeInterval(3)))
+        f.event("PreToolUse", at: now.addingTimeInterval(3))
+        let weighted = p.read(at: now.addingTimeInterval(3)).tokenDeltas.first
+        require(weighted?.tokens == 18 && abs((weighted?.weightedTokens ?? 0) - 2_007.75) < 0.001,
+            "After the transition each request is weighted")
         checks += 1
     }
     static func requestAliasAndInvalidCounters() {
@@ -262,7 +291,7 @@ import Darwin
             }
             return
         }
-        lifecycle(); notificationsAndQuota(); children(); freshnessAndOwner(); countersAndBaseline()
+        lifecycle(); notificationsAndQuota(); children(); freshnessAndOwner(); countersAndBaseline(); olderSnapshotsStayReadable()
         requestAliasAndInvalidCounters(); partialAndTruncation(); privacyAndAtomicity(); boundedIdentitiesAndOwnershipChange()
         installerPreservesAndIsIdempotent(); updateAndUninstall(); invalidSettingsFailClosed(); boundedAndMalformedData(); unknownTerminalEventsLeaveNoFiles(); crossProcessLock()
         print("PASS \(checks) Claude activity lifecycle, token metadata, private snapshots and explicit installer checks")

@@ -566,6 +566,6 @@ struct QuotaChecks {
         try tests.testPublicSnapshotRegressionAndRevalidationPreserveGeneratedTime()
         print("30 quota, pacing, reset-date, collapsed-summary, early recovery and public-reset checks passed")
         ClaudeUsageChecks.run()
-        print("12 Claude live-usage and freshness checks passed")
+        print("\(ClaudeUsageChecks.checkCount) Claude live-usage and freshness checks passed")
     }
 }

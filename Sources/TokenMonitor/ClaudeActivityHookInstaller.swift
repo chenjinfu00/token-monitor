@@ -47,7 +47,7 @@ enum ClaudeActivityHookInstaller {
                 // app-path updates remain recoverable by the next explicit request.
                 state!.commands = Array(Set(state!.commands + [command])).sorted()
                 try ClaudeActivityFiles.atomicWrite(try JSONEncoder().encode(state!), to: stateURL)
-                try ClaudeActivityFiles.atomicWrite(try JSONSerialization.data(withJSONObject: document, options: [.prettyPrinted, .sortedKeys]), to: settingsURL)
+                try ClaudeActivityFiles.atomicWrite(try JSONSerialization.data(withJSONObject: document, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]), to: settingsURL)
                 state!.commands = [command]
                 try ClaudeActivityFiles.atomicWrite(try JSONEncoder().encode(state!), to: stateURL)
             }
@@ -69,7 +69,7 @@ enum ClaudeActivityHookInstaller {
                 // Keep all subsequent user changes, including replacement commands.
                 if original["hooks"] != nil { document["hooks"] = hooks }
                 if !NSDictionary(dictionary: document).isEqual(to: original) {
-                    try ClaudeActivityFiles.atomicWrite(try JSONSerialization.data(withJSONObject: document, options: [.prettyPrinted, .sortedKeys]), to: settingsURL)
+                    try ClaudeActivityFiles.atomicWrite(try JSONSerialization.data(withJSONObject: document, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]), to: settingsURL)
                 }
                 state.commands = []
                 try ClaudeActivityFiles.atomicWrite(try JSONEncoder().encode(state), to: stateURL)

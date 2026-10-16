@@ -10,10 +10,18 @@ struct TokenMonitorEntry {
             ClaudeActivityHook.runFromStandardInput()
             return
         }
+        // From here on, a closed child pipe can never end this process.
+        ProcessSafety.configure()
+        if CommandLine.arguments.contains("--exit-log") {
+            print(ExitDiagnostics.report())
+            return
+        }
         if CommandLine.arguments.contains("--uninstall-claude-activity-hooks") {
             let failure = ClaudeActivityHookInstaller.uninstall()
             if let failure { print(failure); exit(1) }
-            UserDefaults.standard.set(true, forKey: "claudeActivityDisabled")
+            // Installed telemetry keeps reporting Claude activity without hooks.
+            let telemetryEnabled = UserDefaults.standard.bool(forKey: ClaudeTelemetryReceiver.enabledKey)
+            UserDefaults.standard.set(!telemetryEnabled, forKey: "claudeActivityDisabled")
             UserDefaults.standard.set(false, forKey: "claudeActivityEnabled")
             print("Claude 任务活动采集已解除")
             return
@@ -24,6 +32,20 @@ struct TokenMonitorEntry {
             UserDefaults.standard.set(false, forKey: "claudeActivityDisabled")
             UserDefaults.standard.set(true, forKey: "claudeActivityEnabled")
             print("Claude 任务活动采集已启用；请重新开启本地 Code 会话")
+            return
+        }
+        if CommandLine.arguments.contains("--install-claude-telemetry") {
+            if let failure = ClaudeTelemetryInstaller.install() { print(failure); exit(1) }
+            // Opting in to telemetry re-enables Claude activity collection.
+            UserDefaults.standard.set(false, forKey: "claudeActivityDisabled")
+            UserDefaults.standard.set(true, forKey: ClaudeTelemetryReceiver.enabledKey)
+            print("Claude token 遥测已启用：请重新开启 Claude Code 会话。Token Monitor 只在本机 \(ClaudeTelemetryReceiver.logsEndpoint()) 接收 token 计数。")
+            return
+        }
+        if CommandLine.arguments.contains("--uninstall-claude-telemetry") {
+            if let failure = ClaudeTelemetryInstaller.uninstall() { print(failure); exit(1) }
+            UserDefaults.standard.set(false, forKey: ClaudeTelemetryReceiver.enabledKey)
+            print("Claude token 遥测已解除；之后新开的 Claude Code 会话不再导出事件")
             return
         }
         if CommandLine.arguments.contains("--activity-status") {
@@ -96,6 +118,7 @@ if CommandLine.arguments.contains("--probe") {
         app.setActivationPolicy(.accessory)
         let delegate = AppDelegate()
         app.delegate = delegate
+        ExitDiagnostics.begin()
         withExtendedLifetime((instanceLock, delegate)) { app.run() }
     }
 }
@@ -134,7 +157,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             onToggleCompact: { [weak self] in self?.toggleCompact() },
             onToggleEdge: { [weak self] in self?.cycleDisplaySize() },
             onOpenHistory: { [weak self] in self?.openHistory() },
-            onQuit: { [weak self] in self?.quit() },
             onHeightChange: { [weak self] height in
                 DispatchQueue.main.async { self?.resizeContent(to: height) }
             })
@@ -210,6 +232,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         sourceItem.submenu = sourceMenu
         menu.addItem(withTitle: "启用终端 Claude 额度采集", action: #selector(connect), keyEquivalent: "")
         menu.addItem(withTitle: "登录终端 Claude Code", action: #selector(login), keyEquivalent: "").tag = 4
+        menu.addItem(withTitle: "本机 Claude 任务与 token 监测", action: #selector(toggleClaudeTaskMonitoring), keyEquivalent: "").tag = 5
         menu.addItem(withTitle: "紧凑 / 完整显示", action: #selector(toggleCompact), keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "退出 Token Monitor", action: #selector(quit), keyEquivalent: "q")
@@ -227,6 +250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
                     "claudeQuota": ActivityDiagnostics.quotaSnapshot(store.claude),
                     "claudeSource": store.claudeUsesStatusLine ? "statusline" : "official",
                     "claudeRefresh": store.claudeRefreshDiagnosticSnapshot(),
+                    "resetNews": ActivityDiagnostics.resetNewsSnapshot(store.resetNews),
                     "icons": ProviderBrandLayerView.diagnosticSnapshots()]
         }
         if CommandLine.arguments.contains("--history") { openHistory() }
@@ -562,6 +586,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         menu.item(withTag: 3)?.title = store.claudeUsesStatusLine ? "Claude 读取方式：状态栏推送" : "Claude 读取方式：主动查询"
         menu.item(withTag: 31)?.state = store.claudeUsesStatusLine ? .off : .on
         menu.item(withTag: 32)?.state = store.claudeUsesStatusLine ? .on : .off
+        let hooks = UserDefaults.standard.bool(forKey: "claudeActivityEnabled")
+        let telemetry = UserDefaults.standard.bool(forKey: ClaudeTelemetryReceiver.enabledKey)
+        menu.item(withTag: 5)?.state = hooks && telemetry ? .on : (hooks || telemetry ? .mixed : .off)
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -628,7 +655,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
             let content = HistoryPanelView(history: store.history,
                 onToggleExpanded: { [weak self] in self?.cycleDisplaySize() },
                 onClose: { [weak self] in self?.hidePanels() },
-                onQuit: { [weak self] in self?.quit() },
                 onRefresh: { [weak self] in self?.refresh() })
                 .environment(\.providerActivityStore, store.activity)
             panel.contentView = FloatingWindowGlassView.hosting(content, frame: NSRect(origin: .zero, size: frame.size))
@@ -652,6 +678,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
     @objc private func refresh() { store.refreshNow(force: true) }
     @objc private func connect() { store.connectClaude() }
     @objc private func login() { store.loginClaude() }
+
+    // Task hooks report running / waiting / finished; OpenTelemetry reports each
+    // request's tokens. One switch turns both on or off; quota inference stays either way.
+    @objc private func toggleClaudeTaskMonitoring() {
+        let defaults = UserDefaults.standard
+        let enable = !(defaults.bool(forKey: "claudeActivityEnabled") && defaults.bool(forKey: ClaudeTelemetryReceiver.enabledKey))
+        let bundleURL = Bundle.main.bundleURL
+        Task {
+            let (hookFailure, telemetryFailure) = await Task.detached(priority: .userInitiated) { () -> (String?, String?) in
+                enable
+                    ? (ClaudeActivityHookInstaller.installIfNeeded(bundleURL: bundleURL), ClaudeTelemetryInstaller.install())
+                    : (ClaudeActivityHookInstaller.uninstall(), ClaudeTelemetryInstaller.uninstall())
+            }.value
+            if hookFailure == nil { defaults.set(enable, forKey: "claudeActivityEnabled") }
+            if telemetryFailure == nil { defaults.set(enable, forKey: ClaudeTelemetryReceiver.enabledKey) }
+            if enable && (hookFailure == nil || telemetryFailure == nil) { defaults.set(false, forKey: "claudeActivityDisabled") }
+            let alert = NSAlert()
+            if hookFailure == nil && telemetryFailure == nil {
+                alert.messageText = enable ? "已启用本机 Claude 任务与 token 监测" : "已停用本机 Claude 任务与 token 监测"
+                alert.informativeText = enable
+                    ? "之后新开的 Claude Code 会话会上报任务状态和每次请求的 token 数，图标按实际消耗转动；已经打开的会话需要重新打开才生效。只在本机 127.0.0.1 接收，不保存对话内容。"
+                    : "重新打开 Claude Code 会话后不再上报。云端、网页和其他设备的使用仍按额度变化估计转速。"
+            } else {
+                let done: String = enable ? "已启用" : "已停用"
+                let hooks: String = hookFailure ?? done
+                let telemetry: String = telemetryFailure ?? done
+                alert.messageText = "部分设置未完成"
+                alert.informativeText = "任务 hooks：\(hooks)\ntoken 遥测：\(telemetry)"
+            }
+            NSApp.activate(ignoringOtherApps: true)
+            alert.runModal()
+        }
+    }
     @objc private func liveClaudeSource() { store.useClaudeStatusLine(false) }
     @objc private func statusLineClaudeSource() { store.useClaudeStatusLine(true) }
     @objc private func toggleCompact() {
@@ -659,7 +718,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         UserDefaults.standard.set(store.compact, forKey: "compact")
         resizeContent(to: naturalHeight)
     }
-    @objc private func quit() { hidePanels(); store.stop(); NSApplication.shared.terminate(nil) }
+    @objc private func quit() { terminateApp(reason: "menu") }
+    private func terminateApp(reason: String) {
+        ExitDiagnostics.recordQuit(reason: reason)
+        hidePanels(); store.stop(); NSApplication.shared.terminate(nil)
+    }
     func applicationWillTerminate(_ notification: Notification) {
         cancelPanelTransition()
         if isDetailed { setDetailed(false, animated: false) }
@@ -671,5 +734,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMe
         if let activityDiagnosticObserver { DistributedNotificationCenter.default().removeObserver(activityDiagnosticObserver) }
         activityDiagnosticObserver = nil
         NSWorkspace.shared.notificationCenter.removeObserver(self)
+        ExitDiagnostics.finish()
     }
 }

@@ -10,7 +10,6 @@ struct HistoryPanelView: View {
     @ObservedObject var history: UsageHistoryStore
     var onToggleExpanded: () -> Void = {}
     var onClose: () -> Void = {}
-    var onQuit: () -> Void = {}
     var onRefresh: () -> Void = {}
     @HistoryViewState(initialValue: HistoryTimeScale.day) private var scale: HistoryTimeScale
     @HistoryViewState(initialValue: Date()) private var referenceDate: Date
@@ -156,7 +155,7 @@ struct HistoryPanelView: View {
 
     private var filters: some View {
         HStack(spacing: 14) {
-            WindowControlBar(onClose: onQuit, onHide: onClose, onResize: onToggleExpanded,
+            WindowControlBar(onHide: onClose, onResize: onToggleExpanded,
                              onRefresh: onRefresh, isRefreshing: history.isLoading, onDoubleClick: onToggleExpanded) {
                 EmptyView()
             }
@@ -177,26 +176,37 @@ struct HistoryPanelView: View {
             }
             Button { history.refreshResetHistory(); showingEventList = true } label: {
                 Image(systemName: "clock.arrow.circlepath").font(.system(size: 16, weight: .medium)).frame(width: 24, height: 26)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain).foregroundStyle(.secondary)
             .help("重置历史").accessibilityLabel("重置历史")
             .popover(isPresented: $showingEventList, arrowEdge: .bottom) { eventList }
-            HStack(spacing: 8) {
+            HStack(spacing: 2) {
                 providerButton(.codex, brand: .codex, title: "Codex")
                 providerButton(.claude, brand: .claude, title: "Claude")
             }
         }
     }
 
+    // The rotating brand icon is an AppKit layer that lets every click through
+    // (its hitTest returns nil), so on its own it gives the button no hit area:
+    // clicks on it never reached this action. contentShape hands the whole tile
+    // to the button, as the compact window's brand button already does.
     private func providerButton(_ value: HistoryProvider, brand: ProviderBrand, title: String) -> some View {
-        Button { provider = value } label: {
-            ProviderBrandIcon(brand: brand).frame(width: 21, height: 21).frame(width: 24, height: 26)
-            .foregroundStyle(provider == value ? Color.primary : Color.secondary)
-            .opacity(provider == value ? 1 : 0.65)
+        let isSelected = provider == value
+        return Button { provider = value } label: {
+            ProviderBrandIcon(brand: brand)
+                .frame(width: 20, height: 20)
+                .frame(width: 30, height: 26)
+                .background(RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(Color.primary.opacity(isSelected ? 0.12 : 0)))
+                .opacity(isSelected ? 1 : 0.55)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(title)
-        .accessibilityLabel(title + (provider == value ? "，已选择" : ""))
+        .help(isSelected ? "正在显示 " + title : "切换到 " + title)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 
     private var dateNavigation: some View {
@@ -430,7 +440,7 @@ struct HistoryPanelView: View {
     }
 
     private func guideColor(_ guide: QuotaPacingGuide) -> Color {
-        guide.source == .official ? .timeBlue : .websitePurple
+        guide.source == .official ? .timeBlue : (guide.forecastConfidence?.color ?? .secondary)
     }
 
     private func guideLabelX(_ guide: QuotaPacingGuide, proxy: ChartProxy, frame: CGRect) -> CGFloat {
@@ -445,6 +455,7 @@ struct HistoryPanelView: View {
         let frame = geometry[proxy.plotAreaFrame]
         let firstX = guides.first.map { guideLabelX($0, proxy: proxy, frame: frame) }
         return ForEach(Array(guides.enumerated()), id: \.element.id) { index, guide in
+            let confidence = guide.source == .official ? "" : "；" + (guide.forecastConfidence?.label ?? "置信度未知")
             let x = guideLabelX(guide, proxy: proxy, frame: frame)
             let offset: CGFloat = index > 0 && abs(x - (firstX ?? x)) < 124 ? 23 : 0
             Button { revealGuide(guide) } label: {
@@ -460,8 +471,8 @@ struct HistoryPanelView: View {
             }
             .buttonStyle(.plain).foregroundStyle(guideColor(guide))
             .position(x: x, y: frame.minY + 14 + offset)
-            .help("\(guide.source == .official ? "官方重置" : "Codex Reset 提前预测") \(WidgetDateFormatter.reset(guide.targetAt))。虚线为当前周期从 0% 至 100% 的线性额度参考；点击定位。")
-            .accessibilityLabel("\(guide.source == .official ? "官方重置" : "提前预测")，\(WidgetDateFormatter.reset(guide.targetAt))")
+            .help("\(guide.source == .official ? "官方重置" : "Codex Reset 提前预测") \(WidgetDateFormatter.reset(guide.targetAt))\(confidence)。虚线为当前周期从 0% 至 100% 的线性额度参考；点击定位。")
+            .accessibilityLabel("\(guide.source == .official ? "官方重置" : "提前预测")，\(WidgetDateFormatter.reset(guide.targetAt))\(confidence)")
             .accessibilityHint("定位到该重置时间")
         }
     }

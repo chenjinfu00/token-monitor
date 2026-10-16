@@ -2,7 +2,6 @@ import SwiftUI
 
 @MainActor
 struct WindowControlBar<Accessory: View>: View {
-    let onClose: () -> Void
     let onHide: () -> Void
     let onResize: () -> Void
     let onRefresh: () -> Void
@@ -12,8 +11,9 @@ struct WindowControlBar<Accessory: View>: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            control("xmark", label: "退出", action: onClose)
-            control("eye.slash", label: "隐藏", action: onHide)
+            // The close button only hides the window; monitoring keeps running.
+            // The menu bar icon reopens the window, and its menu is the only way to quit.
+            control("xmark", label: "隐藏小窗口（菜单栏图标可重新打开或退出）", action: onHide)
             control("arrow.up.left.and.arrow.down.right", label: "切换窗口大小", action: onResize)
             control("arrow.clockwise", label: "刷新", action: onRefresh)
                 .rotationEffect(.degrees(isRefreshing ? 180 : 0))

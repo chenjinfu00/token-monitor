@@ -18,7 +18,14 @@ struct ClaudeActivityCounters: Codable {
     var input = 0
     var output = 0
     var cacheCreation = 0
+    // Absent from snapshots written before cache reads were weighed.
+    var cacheRead: Int? = nil
     var total: Int { input + output + cacheCreation }
+    // Output-token equivalents at list-price ratios; only the rotation speed uses it.
+    var weighted: Double {
+        Double(output) + Double(input) * TokenWeights.claudeInput
+            + Double(cacheCreation) * TokenWeights.claudeCacheWrite + Double(cacheRead ?? 0) * TokenWeights.claudeCacheRead
+    }
 }
 struct ClaudeActivitySnapshot: Codable {
     var schemaVersion = 1
@@ -30,6 +37,8 @@ struct ClaudeActivitySnapshot: Codable {
     var heartbeatAt: Double
     var agents: [String: ClaudeAgentActivity] = [:]
     var totalTokens = 0
+    // Running output-equivalent total; absent from snapshots of older versions.
+    var weightedTokens: Double? = nil
     var tokenAt: Double? = nil
     var transcriptIdentity: String? = nil
     var transcriptOffset: UInt64 = 0
@@ -74,11 +83,13 @@ enum ClaudeActivityFiles {
               snapshot.owner.pid > 0, snapshot.owner.startedAt.isFinite, snapshot.owner.startedAt > 0,
               snapshot.createdAt.isFinite, snapshot.capturedAt.isFinite, snapshot.heartbeatAt.isFinite,
               snapshot.totalTokens >= 0, snapshot.totalTokens <= 1_000_000_000_000,
+              snapshot.weightedTokens.map({ $0.isFinite && $0 >= 0 && $0 <= 1_000_000_000_000 }) ?? true,
               snapshot.requests.count <= 128, snapshot.requestOrder.count <= 128,
               snapshot.requestAliases.count <= 128, snapshot.agents.count <= 64,
               snapshot.requests.allSatisfy({ validHash($0.key) && $0.value.input >= 0 && $0.value.input <= 1_000_000_000
                   && $0.value.output >= 0 && $0.value.output <= 1_000_000_000
-                  && $0.value.cacheCreation >= 0 && $0.value.cacheCreation <= 1_000_000_000 }),
+                  && $0.value.cacheCreation >= 0 && $0.value.cacheCreation <= 1_000_000_000
+                  && ($0.value.cacheRead.map { $0 >= 0 && $0 <= 1_000_000_000 } ?? true) }),
               snapshot.agents.allSatisfy({ validHash($0.key) && $0.value.at.isFinite }),
               snapshot.requestOrder.allSatisfy(validHash),
               snapshot.requestAliases.allSatisfy({ validHash($0.key) && validHash($0.value) }),
@@ -197,11 +208,14 @@ enum ClaudeActivityHook {
                 createdAt: time, capturedAt: time, heartbeatAt: time)
             if snapshot.owner != owner {
                 snapshot.owner = owner; snapshot.createdAt = time
-                snapshot.totalTokens = 0; snapshot.tokenAt = nil
+                snapshot.totalTokens = 0; snapshot.weightedTokens = 0; snapshot.tokenAt = nil
                 snapshot.transcriptIdentity = nil; snapshot.transcriptOffset = 0
                 snapshot.requests = [:]; snapshot.requestOrder = []; snapshot.requestAliases = [:]
                 snapshot.agents = [:]; snapshot.phase = .idle
             }
+            // Weighted counting starts here for snapshots of older versions; the app
+            // compares weighted totals only between two snapshots that both carry one.
+            if snapshot.weightedTokens == nil { snapshot.weightedTokens = 0 }
             if let path = document["transcript_path"] as? String, path.utf8.count < 4096 {
                 updateUsage(URL(fileURLWithPath: path), snapshot: &snapshot, at: now)
             }
@@ -294,15 +308,19 @@ enum ClaudeActivityHook {
             if let fallback = snapshot.requests.removeValue(forKey: alternative) {
                 old.input = max(old.input, fallback.input); old.output = max(old.output, fallback.output)
                 old.cacheCreation = max(old.cacheCreation, fallback.cacheCreation)
+                if let read = fallback.cacheRead { old.cacheRead = max(old.cacheRead ?? 0, read) }
                 snapshot.requestOrder.removeAll { $0 == alternative }
             }
         }
         let input = token(usage["input_tokens"]), output = token(usage["output_tokens"]), cache = token(usage["cache_creation_input_tokens"])
-        guard input != nil || output != nil || cache != nil else { return }
+        let cacheRead = token(usage["cache_read_input_tokens"])
+        guard input != nil || output != nil || cache != nil || cacheRead != nil else { return }
         var next = old
         next.input = max(old.input, input ?? 0); next.output = max(old.output, output ?? 0)
         next.cacheCreation = max(old.cacheCreation, cache ?? 0)
+        if let cacheRead { next.cacheRead = max(old.cacheRead ?? 0, cacheRead) }
         let delta = next.total - old.total
+        let weightedDelta = next.weighted - old.weighted
         if snapshot.requests[key] == nil { snapshot.requestOrder.append(key) }
         snapshot.requests[key] = next
         for alias in [requestKey, messageKey].compactMap({ $0 }) where alias != key { snapshot.requestAliases[alias] = key }
@@ -311,8 +329,10 @@ enum ClaudeActivityHook {
             snapshot.requestAliases = snapshot.requestAliases.filter { $0.value != removed && $0.key != removed }
         }
         if snapshot.requestAliases.count > 128 { snapshot.requestAliases = [:] }
-        guard delta > 0, snapshot.totalTokens <= 1_000_000_000_000 - delta else { return }
+        guard delta > 0 || weightedDelta > 0, snapshot.totalTokens <= 1_000_000_000_000 - delta,
+              (snapshot.weightedTokens ?? 0) + weightedDelta <= 1_000_000_000_000 else { return }
         snapshot.totalTokens += delta
+        snapshot.weightedTokens = (snapshot.weightedTokens ?? 0) + weightedDelta
         snapshot.tokenAt = max(snapshot.tokenAt ?? 0, date.timeIntervalSince1970)
     }
     private static func token(_ value: Any?) -> Int? {

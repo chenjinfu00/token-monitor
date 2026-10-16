@@ -30,8 +30,22 @@ struct QuotaActivityChecks {
         let slow = observe(&e, 11, at: 60)!
         require(slow.percentPerMinute == 1 && slow.sampledFrom == start, "Use actual capture interval and keep its start")
         require(slow.expiresAt == start.addingTimeInterval(360), "Confirmed consumption expires five minutes after its actual capture")
-        let fast = observe(&e, 12, at: 90)!
-        require(fast.percentPerMinute == 2 && fast.sampledFrom == start.addingTimeInterval(60), "Shorter interval reflects faster percentage consumption")
+        let averaged = observe(&e, 12, at: 90)!
+        require(abs(averaged.percentPerMinute - 4.0 / 3) < 1e-9 && averaged.sampledFrom == start,
+            "Small integer steps average over the recent span: two points in 90 seconds")
+        let fast = observe(&e, 16, at: 120)!
+        require(fast.percentPerMinute == 8 && fast.sampledFrom == start.addingTimeInterval(90),
+            "Three or more points measure the latest interval directly, so a burst reads as a burst")
+    }
+    static func adaptiveSpanReflectsLowConsumption() {
+        var e = QuotaActivityEstimator(); _ = observe(&e, 20, at: 0)
+        for time: TimeInterval in [65, 130, 195] { _ = observe(&e, 20, at: time) }
+        let single = observe(&e, 21, at: 260)!
+        require(abs(single.percentPerMinute - 60.0 / 260) < 1e-9 && single.sampledFrom == start,
+            "One point after four quiet queries is about 0.23 points per minute, not 0.92")
+        let next = observe(&e, 22, at: 325)!
+        require(abs(next.percentPerMinute - 2 * 60.0 / 260) < 1e-9 && next.sampledFrom == start.addingTimeInterval(65),
+            "The span slides: captures older than five minutes leave it")
     }
     static func unchangedAndRecovery() {
         var e = QuotaActivityEstimator(); _ = observe(&e, 30, at: 0)
@@ -144,8 +158,8 @@ struct QuotaActivityChecks {
         require(almostExpired.expiresAt == start.addingTimeInterval(420), "A 299-second delayed capture leaves only one second")
         require(e.observe(state(13, at: 180), at: start.addingTimeInterval(480)) == nil, "At five minutes old, a capture cannot create an already expired lease")
         let fresh = e.observe(state(14, at: 240), at: start.addingTimeInterval(500))!
-        require(fresh.sampledFrom == start.addingTimeInterval(180) && fresh.percentPerMinute == 1,
-                "Expired delivery may serve as the next stable baseline")
+        require(fresh.sampledFrom == start.addingTimeInterval(60) && fresh.percentPerMinute == 1,
+                "Expired deliveries stay in the averaging span: three points over the last three minutes")
         require(fresh.expiresAt == start.addingTimeInterval(540), "Each estimate retains its capture-based expiry")
     }
 
@@ -209,7 +223,8 @@ struct QuotaActivityChecks {
         require(observe(&e, 11, at: 360) == nil, "Five continuous minutes without consumption stops exactly at the deadline")
         require(observe(&e, 11, at: 420) == nil, "More unchanged observations cannot restart expired motion")
         let resumed = observe(&e, 12, at: 480)!
-        require(resumed.percentPerMinute == 1 && resumed.expiresAt == start.addingTimeInterval(780), "A later genuine increment restarts a new five-minute lease")
+        require(abs(resumed.percentPerMinute - 0.2) < 1e-9 && resumed.expiresAt == start.addingTimeInterval(780),
+            "A later genuine increment restarts a new five-minute lease; one point in five quiet minutes is slow")
         let accelerated = observe(&e, 16, at: 540)!
         require(accelerated.percentPerMinute == 4 && accelerated.expiresAt == start.addingTimeInterval(840), "Every real increment updates speed and renews from the actual capture")
         require(observe(&e, 16, at: 600) == accelerated, "No growth after acceleration preserves its existing deadline")
@@ -220,7 +235,9 @@ struct QuotaActivityChecks {
         require(e.observe(state(90, at: 60), at: start.addingTimeInterval(120)) == positive, "A duplicate payload cannot renew or replace confirmed motion")
         require(e.observe(state(99, at: 59), at: start.addingTimeInterval(180)) == positive, "Out-of-order payloads preserve only the existing lease")
         require(e.observe(state(11, at: 61), at: start.addingTimeInterval(181)) == positive, "A sub-five-second unchanged capture does not stop a legitimate lease")
-        require(e.observe(state(12, at: 121), at: start.addingTimeInterval(182))?.percentPerMinute == 1, "Ignored replay values never alter the next measured delta")
+        let measured = e.observe(state(12, at: 121), at: start.addingTimeInterval(182))
+        require(measured.map { abs($0.percentPerMinute - 120.0 / 121) < 1e-9 } == true,
+            "Ignored replay values never alter the measured speed: two points since the first capture")
         var noGrowth = QuotaActivityEstimator(); _ = observe(&noGrowth, 10, at: 0)
         for time: TimeInterval in [60, 120, 180, 240, 300, 360] {
             require(observe(&noGrowth, 10, at: time) == nil, "Unchanged values alone never infer a running task")
@@ -249,11 +266,11 @@ struct QuotaActivityChecks {
         require(observe(&nearDeadline, 11, at: 120, reset: deadline) == nil, "The quota deadline ends the retained estimate immediately")
     }
     static func main() {
-        baselineAndActualInterval(); unchangedAndRecovery(); cycleChanges(); duplicateAndOutOfOrder()
+        baselineAndActualInterval(); adaptiveSpanReflectsLowConsumption(); unchangedAndRecovery(); cycleChanges(); duplicateAndOutOfOrder()
         freshnessAndDeadline(); intervalBounds(); invalidNumbers(); chooseSingleOverallWindow()
         selectionChangesAndMissingWindow(); clockAndIdentityChanges(); delayedDeliveryExpiresConservatively()
         subsecondResetJitterDoesNotRestartCycle(); realDeadlineNumericFixtureAndCumulativeDrift()
         fixedFiveMinuteLeaseAndRenewal(); replayAndShortUnchangedDoNotRenew(); invalidationAndKnownDeadlineBoundLease()
-        print("PASS 16 quota activity groups: fixed five-minute grace, positive-only renewal, replay, resets, freshness and anchored jitter")
+        print("PASS 17 quota activity groups: adaptive averaging span, fixed five-minute grace, positive-only renewal, replay, resets, freshness and anchored jitter")
     }
 }

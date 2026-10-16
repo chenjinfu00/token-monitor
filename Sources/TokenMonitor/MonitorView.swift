@@ -11,7 +11,6 @@ struct MonitorView: View {
     var onToggleCompact: () -> Void
     var onToggleEdge: () -> Void = {}
     var onOpenHistory: () -> Void = {}
-    var onQuit: () -> Void = {}
     var onHeightChange: (CGFloat) -> Void = { _ in }
     @WidgetState(initialValue: CGFloat.zero) private var providerHeight: CGFloat
     @WidgetState(initialValue: CGFloat.zero) private var reportedHeight: CGFloat
@@ -25,7 +24,7 @@ struct MonitorView: View {
     var body: some View {
         Group {
             VStack(spacing: 8) {
-                WindowControlBar(onClose: onQuit, onHide: onClose, onResize: onToggleEdge,
+                WindowControlBar(onHide: onClose, onResize: onToggleEdge,
                     onRefresh: { store.refreshNow(force: true) },
                     isRefreshing: store.codex.isLoading || store.claude.isLoading,
                     onDoubleClick: onToggleEdge) {
@@ -139,9 +138,11 @@ private struct ProviderCard: View {
                         ForEach(windows) { window in quotaWindow(window) }
                         if let reference {
                             RatioRow(kind: .hourglass, label: "网站预测窗口剩余", remaining: reference.remainingPercent(at: now),
-                                unavailable: "网站未提供预测时间", color: .websitePurple)
+                                unavailable: "网站未提供预测时间", color: reference.confidence.color)
+                                .help(reference.description(at: now) + "\n" + reference.confidenceDescription)
                                 .accessibilityLabel("网站预测窗口剩余 " + percentageLabel(reference.remainingPercent(at: now))
-                                    + "；" + reference.description(at: now) + "；网站预测并非账户确认的重置时间")
+                                    + "；" + reference.description(at: now) + "；" + reference.confidenceDescription
+                                    + "；网站预测并非账户确认的重置时间")
                         }
                         if windows.isEmpty {
                             RatioRow(kind: .battery, label: providerName + " 额度剩余", remaining: nil,
@@ -240,7 +241,7 @@ private struct ProviderCard: View {
         ResetTimeButton(slotLabel: "预测", title: "网站预测时间", timestamp: reference.referenceAt,
             now: now,
             description: reference.description(at: now) + "\n" + websiteReferenceDescription(reference, sourceURL: websiteNews?.sourceURL),
-            color: .websitePurple)
+            color: reference.confidence.color)
     }
 
     private func resetDescription(_ window: QuotaWindow) -> String {
@@ -557,6 +558,7 @@ private func resetCountdown(_ reset: Date?, at now: Date) -> String {
 private func websiteReferenceDescription(_ reference: WebsiteResetReference, sourceURL: URL?) -> String {
     "来源：\(sourceURL?.host ?? "codex-resets.com")\n网站预测窗口并非账户确认的重置时间。"
         + "\n公告起点：\(WidgetDateFormatter.reset(reference.startAt))"
+        + "\n" + reference.confidenceDescription
         + "\n预计参考点：\(WidgetDateFormatter.reset(reference.referenceAt))"
         + "\n网站预测窗口开始：\(WidgetDateFormatter.reset(reference.windowStartAt))"
         + "\n网站预测窗口结束：\(WidgetDateFormatter.reset(reference.windowEndAt))"

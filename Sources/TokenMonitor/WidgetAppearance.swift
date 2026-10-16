@@ -22,6 +22,17 @@ enum WidgetAppearance {
     }
 }
 
+extension WebsiteResetReference.Confidence {
+    var color: Color {
+        switch self {
+        case .unknown, .low: return .secondary
+        case .medium: return .claudeOrange
+        case .high: return .websitePurple
+        case .announced: return .codexGreen
+        }
+    }
+}
+
 extension Color {
     static let codexGreen = adaptive(light: NSColor(red: 0.08, green: 0.48, blue: 0.32, alpha: 1),
         dark: NSColor(red: 0.35, green: 0.81, blue: 0.61, alpha: 1))
